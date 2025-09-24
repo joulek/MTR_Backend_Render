@@ -60,7 +60,6 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 /* ✅ statiques */
 app.use("/uploads", express.static(path.resolve(process.cwd(), "uploads")));
 app.use("/files/devis", express.static(path.resolve(process.cwd(), "storage/devis")));
-app.get("/apple-touch-icon.png", (_, res) => res.status(204).end()); // silence warning navigateur
 
 /* ---------------------- MongoDB ---------------------- */
 const MONGO_URI = process.env.MONGODB_URI || "mongodb://localhost:27017/myapp_db";
