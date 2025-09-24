@@ -37,7 +37,7 @@ app.set("trust proxy", 1);
 
 /* ✅ CORS: origine(s) explicites + cookies */
 const ALLOWED_ORIGINS = [
-  "https://frontend-mtr.onrender.com",
+  "https://mtr-frontend-render.onrender.com",
   "http://localhost:3000",
 ];
 app.use(
