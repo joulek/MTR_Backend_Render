@@ -1,4 +1,4 @@
-// utils/pdf.devisGrille.js
+// utils/pdf.devisGrille.js  (ou pdf.DevisGrille.js selon ton import)
 import PDFDocument from "pdfkit";
 import dayjs from "dayjs";
 import fs from "fs";
@@ -53,18 +53,19 @@ export function buildDevisGrillePDF(devis = {}) {
     return null;
   };
 
-  // Texte forcé sur 1 ligne (réduction auto de taille)
+  // Texte forcé sur 1 ligne (réduction auto de taille) — SÉCURISÉ
   const fitOneLine = ({ text, x, y, width, bold = false, maxSize = 10.5, minSize = 8 }) => {
+    const s = (text === undefined || text === null) ? "" : String(text); // ← évite undefined
     const fontName = bold ? "Helvetica-Bold" : "Helvetica";
     let size = maxSize;
     doc.font(fontName);
     while (size > minSize) {
       doc.fontSize(size);
-      const w = doc.widthOfString(text);
+      const w = doc.widthOfString(s);
       if (w <= width) break;
       size -= 0.5;
     }
-    doc.fontSize(size).text(text, x, y, { width, lineBreak: false, align: "left" });
+    doc.fontSize(size).text(s, x, y, { width, lineBreak: false, align: "left" });
     return size;
   };
 
@@ -107,7 +108,6 @@ export function buildDevisGrillePDF(devis = {}) {
 
   /* ===== En-tête (logo + titres) ===== */
   const logoPath = tryImage(["assets/logo_MTR.png"]);
-  // ↑ Agrandi : largeur max 180, hauteur max 85 (ratio conservé)
   if (logoPath) doc.image(logoPath, LEFT, y - 6, { fit: [180, 85] });
 
   doc
@@ -189,7 +189,7 @@ export function buildDevisGrillePDF(devis = {}) {
   pushPair("Tél.", client.tel);
   pushPair("Adresse", client.adresse);
 
-  const rowHClient = 18, labelW = 120; // libellés longs OK
+  const rowHClient = 18, labelW = 120;
   const clientBoxH = rowHClient * clientPairs.length + 8;
   ensureSpace(clientBoxH + 12);
 
@@ -203,7 +203,7 @@ export function buildDevisGrillePDF(devis = {}) {
   });
   y += clientBoxH + 14;
 
-  /* ===== Schéma (images – un peu plus grand) ===== */
+  /* ===== Schéma ===== */
   const imgPaths = [
     tryImage(["assets/grille.png", "/mnt/data/grille.png"]),
     tryImage(["assets/grille02.png", "/mnt/data/grille02.png"]),
@@ -213,11 +213,11 @@ export function buildDevisGrillePDF(devis = {}) {
   if (imgPaths.length) {
     y = section("Schéma", y);
     const GAP = 14;
-    const H_TOP = 170;     // ↑ plus grand qu'avant
-    const H_BOTTOM = 150;  // ↑ idem
+    const H_TOP = 170;
+    const H_BOTTOM = 150;
 
     if (imgPaths.length === 1) {
-      const w = Math.min(INNER_W, 520); // ↑ un peu plus large
+      const w = Math.min(INNER_W, 520);
       ensureSpace(H_TOP + 26);
       const x = LEFT + (INNER_W - w) / 2;
       doc.image(imgPaths[0], x, y + 8, { fit: [w, H_TOP], align: "center", valign: "center" });
@@ -244,14 +244,14 @@ export function buildDevisGrillePDF(devis = {}) {
   const s = spec || {};
   const dims = [sanitize(s.L), sanitize(s.l)].filter(Boolean).join(" × ");
 
+  // ⚠️ 4 cellules par ligne obligatoires
   const rows = [
     ["Dimensions (L × l)", dims || "—", "Nb tiges longitudinales", sanitize(s.nbLong)],
     ["Nb tiges transversales", sanitize(s.nbTrans), "Pas longitudinal (pas1)", sanitize(s.pas1)],
     ["Pas transversal (pas2)", sanitize(s.pas2), "Ø fil (D2)", sanitize(s.D2)],
-    ["Ø fil (D1)", sanitize(s.D1), "Ø fil cadre (D3)",sanitize(s.D3) ],
-    ["Quantité", sanitize(s.quantite ?? devis?.quantite),"Matière", sanitize(s.matiere)],
-    ["Finition", sanitize(s.finition)],
-    ["Type de produit", PRODUCT_LABEL, "", ""],
+    ["Ø fil (D1)", sanitize(s.D1), "Ø fil cadre (D3)", sanitize(s.D3)],
+    ["Quantité", sanitize(s.quantite ?? devis?.quantite), "Matière", sanitize(s.matiere)],
+    ["Finition", sanitize(s.finition), "Type de produit", PRODUCT_LABEL],
   ];
 
   const rowH = 28;
@@ -303,12 +303,10 @@ export function buildDevisGrillePDF(devis = {}) {
   }
 
   if (blocks.length) {
-    // Forcer un saut de page : ces sections commencent en 2e page
     doc.addPage();
     y = TOP;
 
     for (const b of blocks) {
-      // Saut auto si le bloc ne tient pas
       if (y + 22 + b.h + 10 > BOTTOM) { doc.addPage(); y = TOP; }
       y = section(b.title, y);
       doc.save().fillColor("#fff").rect(LEFT, y, INNER_W, b.h).fill().restore();
