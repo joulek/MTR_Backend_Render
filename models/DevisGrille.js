@@ -18,7 +18,7 @@ const spec = new mongoose.Schema({
 
   quantite: { type: Number, required: true },
 
-  matiere: { type: String, enum: ["Acier galvanisé","Acier Noir"], required: true },
+  matiere: { type: String, enum: ["Acier galvanisé","Acier Noir", "Inox"], required: true },
   finition: { type: String, enum: ["Peinture","Chromage","Galvanisation","Autre"], required: true },
 }, { _id:false });
 
