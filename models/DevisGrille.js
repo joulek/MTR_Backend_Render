@@ -12,8 +12,9 @@ const spec = new mongoose.Schema({
   pas1: { type: Number, required: true },  // espacement longitudinal
   pas2: { type: Number, required: true },  // espacement transversal
 
-  D2: { type: Number, required: true },    // diamètre du fil des tiges (D₂)
-  D1: { type: Number, required: true },    // diamètre du fil du cadre (D₁)
+  D2: { type: Number, required: true },    // diamètre du fil  (D₂)
+  D1: { type: Number, required: true },    // diamètre du fil  (D₁)
+  D3: { type: Number, required: true },    // diamètre du fil du cadre (D3)
 
   quantite: { type: Number, required: true },
 

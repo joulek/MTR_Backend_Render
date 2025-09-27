@@ -20,7 +20,7 @@ export const createDevisGrille = async (req, res) => {
       L, l,
       nbLong, nbTrans,
       pas1, pas2,
-      D2, D1,
+      D2, D1, D3,
       quantite,
       matiere, finition,
       exigences, remarques,
@@ -30,7 +30,7 @@ export const createDevisGrille = async (req, res) => {
       L: toNum(L), l: toNum(l),
       nbLong: toNum(nbLong), nbTrans: toNum(nbTrans),
       pas1: toNum(pas1), pas2: toNum(pas2),
-      D2: toNum(D2), D1: toNum(D1),
+      D2: toNum(D2), D1: toNum(D1), D3: toNum(D3),
       quantite: toNum(quantite),
       matiere, finition,
     };
