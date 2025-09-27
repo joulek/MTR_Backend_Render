@@ -247,9 +247,10 @@ export function buildDevisGrillePDF(devis = {}) {
   const rows = [
     ["Dimensions (L × l)", dims || "—", "Nb tiges longitudinales", sanitize(s.nbLong)],
     ["Nb tiges transversales", sanitize(s.nbTrans), "Pas longitudinal (pas1)", sanitize(s.pas1)],
-    ["Pas transversal (pas2)", sanitize(s.pas2), "Ø fil (D2)", sanitize(s.D2),"Ø fil cadre (D3)",sanitize(s.D3) ],
-    ["Ø fil (D1)", sanitize(s.D1), "Quantité", sanitize(s.quantite ?? devis?.quantite)],
-    ["Matière", sanitize(s.matiere), "Finition", sanitize(s.finition)],
+    ["Pas transversal (pas2)", sanitize(s.pas2), "Ø fil (D2)", sanitize(s.D2)],
+    ["Ø fil (D1)", sanitize(s.D1), "Ø fil cadre (D3)",sanitize(s.D3) ],
+    ["Quantité", sanitize(s.quantite ?? devis?.quantite),"Matière", sanitize(s.matiere)],
+    ["Finition", sanitize(s.finition)],
     ["Type de produit", PRODUCT_LABEL, "", ""],
   ];
 
