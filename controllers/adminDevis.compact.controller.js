@@ -20,10 +20,10 @@ export async function listDevisCompact(req, res) {
     const type = (req.query.type || "all").toString().toLowerCase();
     const q = (req.query.q || "").toString().trim();
 
-    // مطابقة (match) باستعمال الفهارس اللي فوق
+    // مطابقة (match)
     const match = {};
     if (type && type !== "all") {
-      match["meta.demandes.type"] = type; // انت تخزّن type داخل linkSchema
+      match["meta.demandes.type"] = type; // type مخزّن داخل linkSchema
     }
     if (q) {
       const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
@@ -33,27 +33,48 @@ export async function listDevisCompact(req, res) {
         { demandeNumero: rx },
         { "meta.demandeNumero": rx },
         { "client.nom": rx },
+        { "client.prenom": rx },
+        { "client.firstName": rx },
+        { "client.lastName": rx },
       ];
     }
 
     const pipeline = [
       { $match: match },
-      // حضّر أرقام الـ demandes و الأنواع من meta + الحقل القديم
+
+      // حضّر أرقام الـ demandes و الأنواع من meta + الحقل القديم + إعادة تركيب اسم العميل
       {
         $project: {
           numero: 1,
           createdAt: 1,
-          clientNom: "$client.nom",
           devisPdf: { $concat: [ORIGIN, "/files/devis/", "$numero", ".pdf"] },
+
+          // Extract first/last variants
+          clientPrenom: {
+            $ifNull: [
+              "$client.prenom",
+              { $ifNull: ["$client.firstName", { $ifNull: ["$prenom", "$firstName"] }] }
+            ]
+          },
+          clientNom: {
+            $ifNull: [
+              "$client.nom",
+              { $ifNull: ["$client.lastName", { $ifNull: ["$nom", "$lastName"] }] }
+            ]
+          },
+
+          // demandes numbers collected from both meta and legacy fields
           allDemNums: {
             $setUnion: [
-              { $ifNull: ["$meta.demandes.numero", []] }, // إذا كانت map objects، نعمل خطوة أخرى
+              { $ifNull: ["$meta.demandes.numero", []] },
               [
                 { $ifNull: ["$demandeNumero", null] },
                 { $ifNull: ["$meta.demandeNumero", null] }
               ]
             ]
           },
+
+          // types collected from both meta and legacy fields
           allTypes: {
             $setUnion: [
               { $ifNull: ["$meta.demandes.type", []] },
@@ -62,27 +83,58 @@ export async function listDevisCompact(req, res) {
           }
         }
       },
+
+      // Nettoyage / filtrage + recomposition "Prénom Nom"
       {
         $project: {
           numero: 1,
           createdAt: 1,
-          clientNom: 1,
           devisPdf: 1,
+
           demandeNumeros: {
             $setDifference: [
-              { $filter: { input: "$allDemNums", as: "n", cond: { $and: [{ $ne: ["$$n", null] }, { $ne: ["$$n", ""] }] } } },
+              {
+                $filter: {
+                  input: "$allDemNums",
+                  as: "n",
+                  cond: { $and: [{ $ne: ["$$n", null] }, { $ne: ["$$n", ""] }] }
+                }
+              },
               [null, ""]
             ]
           },
+
           types: {
             $setDifference: [
-              { $filter: { input: "$allTypes", as: "t", cond: { $and: [{ $ne: ["$$t", null] }, { $ne: ["$$t", ""] }] } } },
+              {
+                $filter: {
+                  input: "$allTypes",
+                  as: "t",
+                  cond: { $and: [{ $ne: ["$$t", null] }, { $ne: ["$$t", ""] }] }
+                }
+              },
               [null, ""]
             ]
+          },
+
+          client: {
+            $trim: {
+              input: {
+                $concat: [
+                  { $ifNull: ["$clientPrenom", ""] },
+                  " ",
+                  { $ifNull: ["$clientNom", ""] }
+                ]
+              }
+            }
           }
         }
       },
+
+      // ترتيب وحدات
       { $sort: { createdAt: -1 } },
+
+      // Pagination
       {
         $facet: {
           meta: [{ $count: "total" }],
@@ -104,7 +156,7 @@ export async function listDevisCompact(req, res) {
       devisPdf: d.devisPdf,
       demandeNumeros: d.demandeNumeros || [],
       types: d.types || [],
-      client: d.clientNom || "",
+      client: d.client || "",
       date: d.createdAt
     }));
 
@@ -120,6 +172,7 @@ export async function listDevisCompact(req, res) {
     return res.status(500).json({ success: false, message: "Erreur serveur" });
   }
 }
+
 export async function listDemandesCompact(req, res) {
   try {
     const page = Math.max(1, parseInt(req.query.page ?? "1", 10));
@@ -140,14 +193,12 @@ export async function listDemandesCompact(req, res) {
       { model: DemandeAutre, t: "autre" },
     ];
 
-    // نختار base pipeline من أول كولكشن ونعمل عليه $unionWith للباقي
+    // base + unions
     const base = bases[0];
     const unions = bases.slice(1);
 
-    // helper: pipeline standard يطبّق على collection demande quelconque
-    // helper: pipeline standard pour n’importe quelle collection de demandes
+    // projection commune
     const commonProjection = (typeLiteral) => ([
-      // ✅ juste extraction locale, pas de $lookup ni autres changements
       {
         $addFields: {
           _devisNumero: { $ifNull: ["$devisNumero", "$devis.numero"] },
@@ -168,7 +219,7 @@ export async function listDemandesCompact(req, res) {
             ]
           },
 
-          // "Prénom Nom" (trim pour gérer valeurs manquantes)
+          // "Prénom Nom"
           _clientFull: {
             $trim: {
               input: {
@@ -188,26 +239,24 @@ export async function listDemandesCompact(req, res) {
           demandeNumero: "$numero",
           type: { $literal: typeLiteral },
           devisNumero: "$_devisNumero",
-          client: "$_clientFull",    // ← UNIQUEMENT Nom+Prénom
+          client: "$_clientFull",    // ← Nom + Prénom
           date: "$createdAt",
         }
       }
     ]);
 
-
     // filtre dynamique (search + type)
     const mkMatch = (tLit) => {
       const m = {};
-      if (type !== "all" && tLit === type) {
-        // نخلّي (match) فارغ هنا ونفلتر بعد ال-union (باش ما نضيعوش مجموع البيانات)
-      }
       if (rx) {
         m.$or = [
           { numero: rx },
           { devisNumero: rx },
           { "devis.numero": rx },
           { "client.nom": rx },
+          { "client.prenom": rx },
           { clientNom: rx },
+          { clientPrenom: rx },
         ];
       }
       return Object.keys(m).length ? [{ $match: m }] : [];
@@ -228,7 +277,6 @@ export async function listDemandesCompact(req, res) {
       }
     }));
 
-    // بعد ال-union نطبّق filtre type النهائي + ترتيب/صفحات
     const finalPipeline = [
       ...basePipeline,
       ...unionStages,
@@ -248,7 +296,6 @@ export async function listDemandesCompact(req, res) {
       }
     ];
 
-    // نرّانيو على أول collection (base)
     const [agg] = await base.model.aggregate(finalPipeline).allowDiskUse(true);
 
     const items = (agg?.items || []).map((d) => ({
