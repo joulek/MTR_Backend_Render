@@ -20,10 +20,9 @@ export async function listDevisCompact(req, res) {
     const type = (req.query.type || "all").toString().toLowerCase();
     const q = (req.query.q || "").toString().trim();
 
-    // مطابقة (match)
     const match = {};
     if (type && type !== "all") {
-      match["meta.demandes.type"] = type; // type مخزّن داخل linkSchema
+      match["meta.demandes.type"] = type;
     }
     if (q) {
       const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
@@ -41,15 +40,12 @@ export async function listDevisCompact(req, res) {
 
     const pipeline = [
       { $match: match },
-
-      // حضّر أرقام الـ demandes و الأنواع من meta + الحقل القديم + إعادة تركيب اسم العميل
       {
         $project: {
           numero: 1,
           createdAt: 1,
           devisPdf: { $concat: [ORIGIN, "/files/devis/", "$numero", ".pdf"] },
 
-          // Extract first/last variants
           clientPrenom: {
             $ifNull: [
               "$client.prenom",
@@ -63,7 +59,6 @@ export async function listDevisCompact(req, res) {
             ]
           },
 
-          // demandes numbers collected from both meta and legacy fields
           allDemNums: {
             $setUnion: [
               { $ifNull: ["$meta.demandes.numero", []] },
@@ -73,8 +68,6 @@ export async function listDevisCompact(req, res) {
               ]
             ]
           },
-
-          // types collected from both meta and legacy fields
           allTypes: {
             $setUnion: [
               { $ifNull: ["$meta.demandes.type", []] },
@@ -83,14 +76,11 @@ export async function listDevisCompact(req, res) {
           }
         }
       },
-
-      // Nettoyage / filtrage + recomposition "Prénom Nom"
       {
         $project: {
           numero: 1,
           createdAt: 1,
           devisPdf: 1,
-
           demandeNumeros: {
             $setDifference: [
               {
@@ -103,7 +93,6 @@ export async function listDevisCompact(req, res) {
               [null, ""]
             ]
           },
-
           types: {
             $setDifference: [
               {
@@ -116,7 +105,6 @@ export async function listDevisCompact(req, res) {
               [null, ""]
             ]
           },
-
           client: {
             $trim: {
               input: {
@@ -130,11 +118,7 @@ export async function listDevisCompact(req, res) {
           }
         }
       },
-
-      // ترتيب وحدات
       { $sort: { createdAt: -1 } },
-
-      // Pagination
       {
         $facet: {
           meta: [{ $count: "total" }],
@@ -183,7 +167,6 @@ export async function listDemandesCompact(req, res) {
 
     const rx = qRaw ? new RegExp(qRaw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") : null;
 
-    // نلمّ كل الكولكشنز
     const bases = [
       { model: DemandeCompression, t: "compression" },
       { model: DemandeTraction, t: "traction" },
@@ -193,25 +176,23 @@ export async function listDemandesCompact(req, res) {
       { model: DemandeAutre, t: "autre" },
     ];
 
-    // base + unions
     const base = bases[0];
     const unions = bases.slice(1);
 
-    // projection commune
     const commonProjection = (typeLiteral) => ([
       {
         $addFields: {
+          // garder l'id pour construire l'URL PDF DDV
+          _id_keep: "$_id",
+
           _devisNumero: { $ifNull: ["$devisNumero", "$devis.numero"] },
 
-          // first name candidates
           _first: {
             $ifNull: [
               "$client.prenom",
               { $ifNull: ["$client.firstName", { $ifNull: ["$prenom", "$firstName"] }] }
             ]
           },
-
-          // last name candidates
           _last: {
             $ifNull: [
               "$client.nom",
@@ -219,8 +200,17 @@ export async function listDemandesCompact(req, res) {
             ]
           },
 
-          // "Prénom Nom"
-          _clientFull: {
+          // simple bool: PDF DDV présent ?
+          _hasDemandePdf: { $ne: ["$demandePdf", null] },
+        }
+      },
+      {
+        $project: {
+          _id: "$_id_keep",                 // <-- garder _id
+          demandeNumero: "$numero",
+          type: { $literal: typeLiteral },
+          devisNumero: "$_devisNumero",
+          client: {
             $trim: {
               input: {
                 $concat: [
@@ -230,22 +220,13 @@ export async function listDemandesCompact(req, res) {
                 ]
               }
             }
-          }
-        }
-      },
-      {
-        $project: {
-          _id: 0,
-          demandeNumero: "$numero",
-          type: { $literal: typeLiteral },
-          devisNumero: "$_devisNumero",
-          client: "$_clientFull",    // ← Nom + Prénom
+          },
           date: "$createdAt",
+          hasDemandePdf: "$_hasDemandePdf", // <-- bool pour front
         }
       }
     ]);
 
-    // filtre dynamique (search + type)
     const mkMatch = (tLit) => {
       const m = {};
       if (rx) {
@@ -255,8 +236,6 @@ export async function listDemandesCompact(req, res) {
           { "devis.numero": rx },
           { "client.nom": rx },
           { "client.prenom": rx },
-          { clientNom: rx },
-          { clientPrenom: rx },
         ];
       }
       return Object.keys(m).length ? [{ $match: m }] : [];
@@ -299,11 +278,17 @@ export async function listDemandesCompact(req, res) {
     const [agg] = await base.model.aggregate(finalPipeline).allowDiskUse(true);
 
     const items = (agg?.items || []).map((d) => ({
+      _id: d._id,
       demandeNumero: d.demandeNumero,
       type: d.type,
       devisNumero: d.devisNumero || null,
       client: d.client || "",
       date: d.date,
+
+      // 🔗 lien PDF DDV si dispo, sinon null
+      ddvPdf: d.hasDemandePdf ? `${ORIGIN}/api/devis/${d.type}/${d._id}/pdf` : null,
+
+      // ancien lien PDF du devis (si un devis existe)
       devisPdf: d.devisNumero ? `${ORIGIN}/files/devis/${d.devisNumero}.pdf` : null,
     }));
 
