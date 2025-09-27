@@ -2,7 +2,7 @@ import Devis from "../models/Devis.js";
 import DemandeCompression from "../models/DevisCompression.js";
 import DemandeTraction    from "../models/DevisTraction.js";
 import DemandeTorsion     from "../models/DevisTorsion.js";
-import DemandeFil         from "../models/DevisFil.js";
+import DemandeFil         from "../models/DevisFilDresse.js";
 import DemandeGrille      from "../models/DevisGrille.js";
 import DemandeAutre       from "../models/DevisAutre.js";
 
