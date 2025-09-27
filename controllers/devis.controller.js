@@ -372,36 +372,36 @@ export const createFromDemande = async (req, res) => {
   try {
     const { demandeIds = [], lines = [], sendEmail = true } = req.body;
 
+    // utils محليّة
+    const ORIGIN = `${req.protocol}://${req.get("host")}`;
+    const toNum = (v) => +Number(v || 0).toFixed(3);
+    const SEG_FOR_TYPE = (t) => {
+      // عدّلها لو راوت “fil” عندك اسمه fildresse
+      if (t === "fildresse") return "fil";
+      return t || "autre";
+    };
+
+    // 0) Validation
     if (!Array.isArray(demandeIds) || !demandeIds.length) {
-      return res
-        .status(400)
-        .json({ success: false, message: "demandeIds[] requis" });
+      return res.status(400).json({ success: false, message: "demandeIds[] requis" });
     }
     if (!Array.isArray(lines) || !lines.length) {
-      return res
-        .status(400)
-        .json({ success: false, message: "lines[] requises" });
+      return res.status(400).json({ success: false, message: "lines[] requises" });
     }
 
-    // 1) Charger toutes les demandes
+    // 1) Charger demandes (multi-type)
     const loaded = [];
     for (const id of demandeIds) {
       const found = await findDemandeAny(id);
       if (!found) {
-        return res
-          .status(404)
-          .json({ success: false, message: `Demande introuvable: ${id}` });
+        return res.status(404).json({ success: false, message: `Demande introuvable: ${id}` });
       }
-      loaded.push(found);
+      loaded.push(found); // { type, doc }
     }
 
-    // 2) Vérifier même client
-    const firstUserId = (
-      loaded[0].doc?.user?._id || loaded[0].doc?.user
-    )?.toString?.();
-    const sameClient = loaded.every(
-      (f) => (f.doc?.user?._id || f.doc?.user)?.toString?.() === firstUserId
-    );
+    // 2) Même client
+    const firstUserId = (loaded[0].doc?.user?._id || loaded[0].doc?.user)?.toString?.();
+    const sameClient = loaded.every((f) => (f.doc?.user?._id || f.doc?.user)?.toString?.() === firstUserId);
     if (!sameClient) {
       return res.status(400).json({
         success: false,
@@ -410,18 +410,15 @@ export const createFromDemande = async (req, res) => {
     }
     const demandeUser = loaded[0].doc.user;
 
-    // 2bis) Maps pratiques pour retrouver le numéro de chaque demande
+    // Maps aide
     const numeroById = new Map(loaded.map((f) => [String(f.doc._id), f.doc.numero]));
-    const numeroByNumero = new Map(
-      loaded.map((f) => [String(f.doc.numero || "").toUpperCase(), f.doc.numero])
-    );
 
-    // 3) Construire les lignes d'articles avec leur N° demande
+    // 3) Lignes d’articles
     const itemDocs = [];
     for (const ln of lines) {
       const {
-        demandeId, // peut être un ObjectId OU parfois directement "DDV25…"
-        demandeNumero, // optionnel si le front l'envoie déjà
+        demandeId,
+        demandeNumero,
         articleId,
         qty = 1,
         remisePct = 0,
@@ -429,46 +426,27 @@ export const createFromDemande = async (req, res) => {
       } = ln || {};
 
       if (!articleId) {
-        return res.status(400).json({
-          success: false,
-          message: "Chaque ligne doit contenir articleId",
-        });
+        return res.status(400).json({ success: false, message: "Chaque ligne doit contenir articleId" });
       }
 
       const art = await Article.findById(articleId);
       if (!art) {
-        return res
-          .status(404)
-          .json({ success: false, message: `Article introuvable pour la ligne` });
+        return res.status(404).json({ success: false, message: "Article introuvable pour une ligne" });
       }
 
-      // 🔎 CORRECTION: Trouver le bon numéro de demande pour CETTE ligne
+      // رقم الطلب الخاص بهذه السطر
       let numFromLine = null;
-
-      // 1. Si demandeId est un ObjectId valide, chercher dans numeroById
       if (demandeId && mongoose.isValidObjectId(demandeId)) {
         numFromLine = numeroById.get(String(demandeId));
       }
-
-      // 2. Si demandeId est déjà un numéro DDV (string), l'utiliser directement
-      if (
-        !numFromLine &&
-        typeof demandeId === "string" &&
-        demandeId.toUpperCase().startsWith("DDV")
-      ) {
+      if (!numFromLine && typeof demandeId === "string" && demandeId.toUpperCase().startsWith("DDV")) {
         numFromLine = demandeId.toUpperCase();
       }
-
-      // 3. Si demandeNumero est fourni, l'utiliser directement
-      if (!numFromLine && demandeNumero) {
-        numFromLine = String(demandeNumero).toUpperCase();
-      }
-
-      // 4. fallback: numéro de la 1ʳᵉ demande (sécurité)
+      if (!numFromLine && demandeNumero) numFromLine = String(demandeNumero).toUpperCase();
       if (!numFromLine) numFromLine = loaded[0].doc.numero || "";
 
       const qte = toNum(qty || 1);
-      const puht = toNum(art.prixHT || art.priceHT || 0);
+      const puht = toNum(art.prixHT ?? art.priceHT ?? 0);
       const remise = toNum(remisePct || 0);
       const tva = toNum(tvaPct || 0);
       const totalHT = +(qte * puht * (1 - remise / 100)).toFixed(3);
@@ -482,24 +460,17 @@ export const createFromDemande = async (req, res) => {
         remisePct: remise,
         tvaPct: tva,
         totalHT,
-        // ✅ N° Demande de la ligne
         demandeNumero: numFromLine,
       });
     }
     if (!itemDocs.length) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Aucune ligne valide" });
+      return res.status(400).json({ success: false, message: "Aucune ligne valide" });
     }
 
     // 4) Totaux
-    const mtht = +itemDocs
-      .reduce((s, it) => s + (it.totalHT || 0), 0)
-      .toFixed(3);
+    const mtht = +itemDocs.reduce((s, it) => s + (it.totalHT || 0), 0).toFixed(3);
     const mtnetht = mtht;
-    const mttva = +itemDocs
-      .reduce((s, it) => s + it.totalHT * (toNum(it.tvaPct) / 100), 0)
-      .toFixed(3);
+    const mttva = +itemDocs.reduce((s, it) => s + it.totalHT * (toNum(it.tvaPct) / 100), 0).toFixed(3);
     const mfodec = +((mtnetht) * 0.01).toFixed(3);
     const timbre = 0;
     const mttc = +(mtnetht + mttva + mfodec + timbre).toFixed(3);
@@ -507,7 +478,7 @@ export const createFromDemande = async (req, res) => {
     // 5) Numéro du devis
     const numero = await nextDevisNumber();
 
-    // 6) Créer le devis central
+    // 6) Créer devis “central”
     const devis = await Devis.create({
       numero,
       demandeId: loaded[0].doc._id,
@@ -515,9 +486,7 @@ export const createFromDemande = async (req, res) => {
       demandeNumero: loaded[0].doc.numero,
       client: {
         id: demandeUser?._id,
-        nom:
-          `${demandeUser?.prenom || ""} ${demandeUser?.nom || ""}`.trim() ||
-          demandeUser?.email,
+        nom: `${demandeUser?.prenom || ""} ${demandeUser?.nom || ""}`.trim() || demandeUser?.email,
         email: demandeUser?.email,
         adresse: demandeUser?.adresse,
         tel: demandeUser?.numTel,
@@ -526,165 +495,73 @@ export const createFromDemande = async (req, res) => {
       items: itemDocs,
       totaux: { mtht, mtnetht, mttva, fodecPct: 1, mfodec, timbre, mttc },
       meta: {
-        demandes: loaded.map((x) => ({
-          id: x.doc._id,
-          numero: x.doc.numero,
-          type: x.type,
-        })),
+        demandes: loaded.map((x) => ({ id: x.doc._id, numero: x.doc.numero, type: x.type })),
       },
     });
 
-    // 7) Générer et envoyer l'email avec le nouveau design
-    const { filename } = await buildDevisPDF(devis);
-    const pdfPath = path.resolve(process.cwd(), "storage/devis", filename);
-    const pdfUrl = `${ORIGIN}/files/devis/${filename}`;
+    // 7) PDF (robuste) + fallback
+    let pdfUrl = null;
+    try {
+      const { filename } = await buildDevisPDF(devis);
+      const pdfPath = path.resolve(process.cwd(), "storage/devis", filename);
+      // تأكّد من وجود static files /files/devis/* في السيرفر
+      pdfUrl = `${ORIGIN}/files/devis/${filename}`;
+      // ممكن تحتاج تحفظ pdfPath لو تحب تبعت attachment في الإيميل
+    } catch (err) {
+      // fallback لفتح PDF الطلب الأول
+      const seg = SEG_FOR_TYPE(loaded[0].type);
+      pdfUrl = `${ORIGIN}/api/devis/${seg}/${loaded[0].doc._id}/pdf`;
+      console.error("buildDevisPDF failed, using fallback:", err?.message || err);
+    }
 
-    if (sendEmail && devis.client.email) {
-      const transport = makeTransport();
+    // 8) Email (non-bloquant)
+    let email = { sent: false, error: null };
+    if (sendEmail && devis.client?.email) {
+      try {
+        const transport = makeTransport();
 
-      // Styles communs
-      const BRAND_PRIMARY = "#002147";
-      const BAND_DARK = "#0B2239";
-      const BAND_TEXT = "#FFFFFF";
-      const PAGE_BG = "#F5F7FB";
-      const CONTAINER_W = 680;
-
-      const subject = `Votre devis ${devis.numero}`;
-
-      // === Ajout: liens des demandes liées (numéro + URL PDF) ===
-      const DEMANDE_ROUTE = {
-        autre: "autre",
-        compression: "compression",
-        traction: "traction",
-        torsion: "torsion",
-        fil: "filDresse",
-        grille: "grille",
-      };
-
-      const demandesLinks = loaded.map((x) => {
-        const seg = DEMANDE_ROUTE[x.type] || x.type;
-        return {
-          numero: x.doc.numero,
-          url: `${ORIGIN}/api/devis/${seg}/${x.doc._id}/pdf`,
+        const DEMANDE_ROUTE = {
+          autre: "autre",
+          compression: "compression",
+          traction: "traction",
+          torsion: "torsion",
+          fil: "fil",    // غيّرها إلى fildresse إذا هذا هو الراوت عندك
+          grille: "grille",
         };
-      });
+        const demandesLinks = loaded.map((x) => {
+          const seg = DEMANDE_ROUTE[x.type] || SEG_FOR_TYPE(x.type);
+          return { numero: x.doc.numero, url: `${ORIGIN}/api/devis/${seg}/${x.doc._id}/pdf` };
+        });
+        const subject = `Votre devis ${devis.numero}`;
+        const textBody =
+          `Bonjour${devis.client?.nom ? " " + devis.client.nom : ""},\n\n` +
+          `Veuillez trouver votre devis: ${pdfUrl}\n` +
+          (demandesLinks.length ? `Demandes liées: ${demandesLinks.map(d => d.numero).join(", ")}\n` : "") +
+          `\nCordialement,\nMTR`;
 
-      const demandesLine = demandesLinks.map((d) => d.numero).join(", ");
-
-      const demandesHtml = demandesLinks.length
-        ? `<p style="margin:0 0 6px 0"><strong>Demande(s) liée(s)&nbsp;:</strong>
-             ${demandesLinks
-               .map(
-                 (d) =>
-                   `<a href="${d.url}" target="_blank" rel="noopener" style="color:#0B1E3A;text-decoration:none">${d.numero}</a>`
-               )
-               .join(" · ")}
-           </p>`
-        : "";
-
-      const textBody = `Bonjour${devis.client?.nom ? " " + devis.client.nom : ""},
-
-Veuillez trouver ci-joint votre devis ${devis.numero}.
-${demandesLine ? "Demandes liées : " + demandesLine + "\n" : ""}Cordialement,
-MTR – Manufacture Tunisienne des ressorts`;
-
-      const totalTTC = (devis?.totaux?.mttc ?? 0).toFixed(3);
-      const nbLignes = Array.isArray(devis?.items) ? devis.items.length : 0;
-
-      const htmlBody = `<!doctype html>
-<html>
-  <head>
-    <meta charSet="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>${subject}</title>
-  </head>
-  <body style="margin:0;background:${PAGE_BG};font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,'Apple Color Emoji','Segoe UI Emoji';color:#111827;">
-    <table role="presentation" cellpadding="0" cellspacing="0" border="0"
-           style="width:100%;background:${PAGE_BG};margin:0;padding:24px 16px;border-collapse:collapse;border-spacing:0;mso-table-lspace:0pt;mso-table-rspace:0pt;">
-      <tr>
-        <td align="center" style="padding:0;margin:0;">
-
-          <table role="presentation" cellpadding="0" cellspacing="0" border="0"
-                 style="width:${CONTAINER_W}px;max-width:100%;border-collapse:collapse;border-spacing:0;mso-table-lspace:0pt;mso-table-rspace:0pt;">
-
-            <!-- Bande TOP -->
-            <tr>
-              <td style="padding:0;">
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border-spacing:0;">
-                  <tr>
-                    <td style="background:${BAND_DARK};color:${BAND_TEXT};text-align:center;
-                               padding:14px 20px;font-weight:800;font-size:14px;letter-spacing:.3px;
-                               border-radius:8px;box-sizing:border-box;width:100%;">
-                      MTR – Manufacture Tunisienne des ressorts
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>
-
-            <tr><td style="height:16px;line-height:16px;font-size:0;">&nbsp;</td></tr>
-
-            <!-- Carte contenu -->
-            <tr>
-              <td style="padding:0;">
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
-                       style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;
-                              border-collapse:separate;box-sizing:border-box;">
-                  <tr>
-                    <td style="padding:24px;">
-                      <h1 style="margin:0 0 12px 0;font-size:18px;line-height:1.35;color:${BRAND_PRIMARY};">
-                        Nouvelle Devis ${devis.numero}
-                      </h1>
-
-                      <p style="margin:0 0 12px 0;">Bonjour${devis.client?.nom ? " " + devis.client.nom : ""},</p>
-                      <p style="margin:0 0 16px 0;">Veuillez trouver ci-joint votre devis.</p>
-                      ${demandesHtml}
-
-                      <p style="margin:16px 0 0 0;">Cordialement.<br></p>
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>
-
-            <tr><td style="height:16px;line-height:16px;font-size:0;">&nbsp;</td></tr>
-
-            <!-- Bande BOTTOM (même largeur, même si vide) -->
-             <tr>
-              <td style="padding:0;">
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
-                       style="border-collapse:collapse;border-spacing:0;">
-                  <tr>
-                    <td style="background:${BAND_DARK};color:${BAND_TEXT};text-align:center;
-                               padding:14px 20px;font-weight:800;font-size:14px;letter-spacing:.3px;
-                               border-radius:8px;box-sizing:border-box;width:100%;">
-                      &nbsp;
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-    </table>
-  </body>
-</html>`;
-
-      await transport.sendMail({
-        from: process.env.MAIL_FROM || "devis@mtr.tn",
-        to: devis.client.email,
-        subject,
-        text: textBody,
-        html: htmlBody,
-        attachments: [{ filename, path: pdfPath }],
-      });
+        await transport.sendMail({
+          from: process.env.MAIL_FROM || "devis@mtr.tn",
+          to: devis.client.email,
+          subject,
+          text: textBody,
+          // بإمكانك إضافة html و/أو attachment الـPDF النهائي إذا متوفر
+        });
+        email.sent = true;
+      } catch (err) {
+        email = {
+          sent: false,
+          error: { code: err?.code, command: err?.command, message: err?.message },
+        };
+        // لا نسقط الراوت
+        console.error("sendMail failed:", err);
+      }
     }
 
     return res.json({
       success: true,
       devis: { _id: devis._id, numero: devis.numero },
       pdf: pdfUrl,
+      email,
     });
   } catch (e) {
     console.error("createFromDemande:", e);
@@ -694,3 +571,4 @@ MTR – Manufacture Tunisienne des ressorts`;
     });
   }
 };
+
