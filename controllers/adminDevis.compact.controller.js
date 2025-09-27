@@ -157,14 +157,15 @@ export async function listDevisCompact(req, res) {
   }
 }
 
+
+
 export async function listDemandesCompact(req, res) {
   try {
     const page  = Math.max(1, parseInt(req.query.page ?? "1", 10));
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit ?? "20", 10)));
     const skip  = (page - 1) * limit;
-
-    const type = (req.query.type || "all").toString().toLowerCase();
-    const qRaw = (req.query.q || "").toString().trim();
+    const type  = (req.query.type || "all").toString().toLowerCase();
+    const qRaw  = (req.query.q || "").toString().trim();
 
     const rx = qRaw ? new RegExp(qRaw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") : null;
 
@@ -176,11 +177,9 @@ export async function listDemandesCompact(req, res) {
       { model: DemandeGrille,      t: "grille" },
       { model: DemandeAutre,       t: "autre" },
     ];
-
-    const base   = bases[0];
+    const base = bases[0];
     const unions = bases.slice(1);
 
-    // ---- petits helpers communs d'aggregation ----
     const mkMatch = () => {
       if (!rx) return [];
       return [{
@@ -191,85 +190,86 @@ export async function listDemandesCompact(req, res) {
             { "devis.numero": rx },
             { "client.nom": rx },
             { "client.prenom": rx },
-            { "client.lastName": rx },
-            { "client.firstName": rx },
+            // recherche via user (après lookup)
+            { "__user.prenom": rx },
+            { "__user.nom": rx },
+            { "__user.firstName": rx },
+            { "__user.lastName": rx },
+            { "__user.email": rx },
           ]
         }
       }];
     };
 
-    const commonProjection = (typeLiteral) => ([
+    // ---- Étapes communes par collection (inclut $lookup users) ----
+    const commonStages = (typeLiteral) => ([
+      // 1) ramener l’utilisateur si le doc contient `user: ObjectId`
       {
-        // Normalise les champs pour calculer nom/prenom + documents
+        $lookup: {
+          from: "users",
+          localField: "user",
+          foreignField: "_id",
+          as: "__userArr",
+        }
+      },
+      {
+        $addFields: {
+          __user: { $ifNull: [ { $arrayElemAt: ["$__userArr", 0] }, null ] }
+        }
+      },
+
+      // 2) normaliser champs
+      {
         $addFields: {
           __keepId: "$_id",
-
-          // numéro devis possible dans deux emplacements
           __devisNumero: { $ifNull: ["$devisNumero", "$devis.numero"] },
 
-          // client.{prenom,nom,email,numTel} fusion depuis différents schémas
-          __client_prenom: {
+          // ordre prioritaire: client.prenom -> client.firstName -> this.prenom -> user.prenom/firstName
+          __first: {
             $ifNull: [
               "$client.prenom",
-              { $ifNull: ["$client.firstName", { $ifNull: ["$prenom", "$firstName"] }] }
+              { $ifNull: [
+                "$client.firstName",
+                { $ifNull: [
+                  "$prenom",
+                  { $ifNull: [
+                    "$firstName",
+                    { $ifNull: ["$__user.prenom", "$__user.firstName"] }
+                  ] }
+                ] }
+              ] }
             ]
           },
-          __client_nom: {
+          __last: {
             $ifNull: [
               "$client.nom",
-              { $ifNull: ["$client.lastName", { $ifNull: ["$nom", "$lastName"] }] }
+              { $ifNull: [
+                "$client.lastName",
+                { $ifNull: [
+                  "$nom",
+                  { $ifNull: ["$lastName", { $ifNull: ["$__user.nom", "$__user.lastName"] }] }
+                ] }
+              ] }
             ]
           },
-          __client_email: {
-            $ifNull: ["$client.email", "$email"]
-          },
-          __client_numTel: {
-            $ifNull: ["$client.numTel", "$numTel"]
-          },
 
-          // Présence du PDF DDV
+          __email:   { $ifNull: [ "$client.email",   { $ifNull: [ "$email",   "$__user.email"   ] } ] },
+          __numTel:  { $ifNull: [ "$client.numTel",  { $ifNull: [ "$numTel",  "$__user.numTel"  ] } ] },
+
           __hasDemandePdf: { $ne: ["$demandePdf", null] },
 
-          // Map des documents -> (index, filename, mimetype, size, hasData)
-          // Utilise $map + $binarySize si dispo (MongoDB 5+). Si non dispo, on fera le size côté JS plus bas.
-          __documents: {
+          // compter pièces jointes (pas besoin des binaires ici)
+          __attachmentsCount: {
             $cond: [
               { $isArray: "$documents" },
-              {
-                $map: {
-                  input: "$documents",
-                  as: "d",
-                  in: {
-                    index: { $indexOfArray: ["$documents", "$$d"] },
-                    filename: "$$d.filename",
-                    mimetype: "$$d.mimetype",
-                    size: {
-                      $cond: [
-                        { $gt: [ { $type: "$$d.data" }, "missing" ] },
-                        // essaie $binarySize, sinon 0:
-                        { $cond: [
-                          { $eq: [ { $type: "$$d.data" }, "binData" ] },
-                          { $binarySize: "$$d.data" },
-                          0
-                        ]},
-                        0
-                      ]
-                    },
-                    hasData: {
-                      $and: [
-                        { $gt: [ { $type: "$$d.data" }, "missing" ] },
-                        { $eq: [ { $type: "$$d.data" }, "binData" ] },
-                        { $gt: [ { $binarySize: "$$d.data" }, 0 ] }
-                      ]
-                    }
-                  }
-                }
-              },
-              []
+              { $size: "$documents" },
+              0
             ]
           }
         }
       },
+
+      // 3) projection compacte pour la liste
       {
         $project: {
           _id: "$__keepId",
@@ -277,32 +277,24 @@ export async function listDemandesCompact(req, res) {
           type: { $literal: typeLiteral },
           devisNumero: "$__devisNumero",
           clientName: {
-            $trim: {
-              input: {
-                $concat: [
-                  { $ifNull: ["$__client_prenom", ""] },
-                  " ",
-                  { $ifNull: ["$__client_nom", ""] }
-                ]
-              }
-            }
+            $trim: { input: { $concat: [ { $ifNull: ["$__first", ""] }, " ", { $ifNull: ["$__last", ""] } ] } }
           },
           client: {
-            prenom: { $ifNull: ["$__client_prenom", ""] },
-            nom:    { $ifNull: ["$__client_nom", ""] },
-            email:  { $ifNull: ["$__client_email", ""] },
-            numTel: { $ifNull: ["$__client_numTel", ""] },
+            prenom:  { $ifNull: ["$__first",  ""] },
+            nom:     { $ifNull: ["$__last",   ""] },
+            email:   { $ifNull: ["$__email",  ""] },
+            numTel:  { $ifNull: ["$__numTel", ""] },
           },
           date: "$createdAt",
           hasDemandePdf: "$__hasDemandePdf",
-          documents: "$__documents"
+          attachments: "$__attachmentsCount"
         }
       }
     ]);
 
     const basePipeline = [
       ...mkMatch(),
-      ...commonProjection(base.t),
+      ...commonStages(base.t),
     ];
 
     const unionStages = unions.map(({ model, t }) => ({
@@ -310,7 +302,7 @@ export async function listDemandesCompact(req, res) {
         coll: model.collection.name,
         pipeline: [
           ...mkMatch(),
-          ...commonProjection(t),
+          ...commonStages(t),
         ]
       }
     }));
@@ -322,7 +314,7 @@ export async function listDemandesCompact(req, res) {
       { $sort: { date: -1 } },
       {
         $facet: {
-          meta: [{ $count: "total" }],
+          meta:  [{ $count: "total" }],
           items: [{ $skip: skip }, { $limit: limit }],
         }
       },
@@ -337,27 +329,8 @@ export async function listDemandesCompact(req, res) {
     const [agg] = await base.model.aggregate(finalPipeline).allowDiskUse(true);
     const rows = agg?.items || [];
 
-    // Post-traitement JS (au cas où $binarySize n’est pas dispo côté cluster)
     const items = rows.map((d) => {
-      const docs = (d.documents || []).map((doc, idx) => {
-        // recalcul size/hasData si null/0:
-        let size = doc.size;
-        let hasData = !!doc.hasData;
-        // si tu veux renforcer en lisant depuis le doc original, laisse comme ça (agrégat multi-colls = on n'a pas le binaire ici)
-        // donc on garde les métadonnées calculées par l'agg; fallback à 0/false:
-        size = Number.isFinite(size) ? size : 0;
-        hasData = !!hasData;
-
-        return {
-          index: Number.isFinite(doc.index) ? doc.index : idx,
-          filename: doc.filename || "",
-          mimetype: doc.mimetype || "",
-          size,
-          hasData
-        };
-      });
-
-      const ddvPdf  = d.hasDemandePdf ? `${ORIGIN}/api/devis/${d.type}/${d._id}/pdf` : null;
+      const ddvPdf   = d.hasDemandePdf ? `${ORIGIN}/api/devis/${d.type}/${d._id}/pdf` : null;
       const devisPdf = d.devisNumero ? `${ORIGIN}/files/devis/${d.devisNumero}.pdf` : null;
 
       return {
@@ -365,24 +338,18 @@ export async function listDemandesCompact(req, res) {
         demandeNumero: d.demandeNumero,
         type: d.type,
         devisNumero: d.devisNumero || null,
-        // ✨ ce que tu voulais: nom/prénom visibles + objet client si besoin
         clientName: d.clientName || "",
         client: d.client || { prenom: "", nom: "", email: "", numTel: "" },
         date: d.date,
         hasDemandePdf: !!d.hasDemandePdf,
         ddvPdf,
         devisPdf,
-        documents: docs
+        // juste le nombre (affichage “Fichiers joints”)
+        attachments: Number.isFinite(d.attachments) ? d.attachments : 0,
       };
     });
 
-    return res.json({
-      success: true,
-      page,
-      limit,
-      total: agg?.total || 0,
-      items,
-    });
+    return res.json({ success: true, page, limit, total: agg?.total || 0, items });
   } catch (e) {
     console.error("listDemandesCompact error:", e);
     return res.status(500).json({ success: false, message: "Erreur serveur" });
