@@ -1,12 +1,12 @@
 import Devis from "../models/Devis.js";
 import DemandeCompression from "../models/DevisCompression.js";
-import DemandeTraction    from "../models/DevisTraction.js";
-import DemandeTorsion     from "../models/DevisTorsion.js";
-import DemandeFil         from "../models/DevisFilDresse.js";
-import DemandeGrille      from "../models/DevisGrille.js";
-import DemandeAutre       from "../models/DevisAutre.js";
+import DemandeTraction from "../models/DevisTraction.js";
+import DemandeTorsion from "../models/DevisTorsion.js";
+import DemandeFil from "../models/DevisFilDresse.js";
+import DemandeGrille from "../models/DevisGrille.js";
+import DemandeAutre from "../models/DevisAutre.js";
 
-const ORIGIN = process.env.PUBLIC_BACKEND_URL || `http://localhost:${process.env.PORT }`;
+const ORIGIN = process.env.PUBLIC_BACKEND_URL || `http://localhost:${process.env.PORT}`;
 
 /**
  * GET /api/admin/devis/compact?type=all|compression|traction|torsion|fil|grille|autre&q=...&page=1&limit=20
@@ -14,11 +14,11 @@ const ORIGIN = process.env.PUBLIC_BACKEND_URL || `http://localhost:${process.env
  */
 export async function listDevisCompact(req, res) {
   try {
-    const page  = Math.max(1, parseInt(req.query.page ?? "1", 10));
+    const page = Math.max(1, parseInt(req.query.page ?? "1", 10));
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit ?? "20", 10)));
-    const skip  = (page - 1) * limit;
-    const type  = (req.query.type || "all").toString().toLowerCase();
-    const q     = (req.query.q || "").toString().trim();
+    const skip = (page - 1) * limit;
+    const type = (req.query.type || "all").toString().toLowerCase();
+    const q = (req.query.q || "").toString().trim();
 
     // مطابقة (match) باستعمال الفهارس اللي فوق
     const match = {};
@@ -70,13 +70,13 @@ export async function listDevisCompact(req, res) {
           devisPdf: 1,
           demandeNumeros: {
             $setDifference: [
-              { $filter: { input: "$allDemNums", as: "n", cond: { $and: [ { $ne: ["$$n", null] }, { $ne: ["$$n", ""] } ] } } },
+              { $filter: { input: "$allDemNums", as: "n", cond: { $and: [{ $ne: ["$$n", null] }, { $ne: ["$$n", ""] }] } } },
               [null, ""]
             ]
           },
           types: {
             $setDifference: [
-              { $filter: { input: "$allTypes", as: "t", cond: { $and: [ { $ne: ["$$t", null] }, { $ne: ["$$t", ""] } ] } } },
+              { $filter: { input: "$allTypes", as: "t", cond: { $and: [{ $ne: ["$$t", null] }, { $ne: ["$$t", ""] }] } } },
               [null, ""]
             ]
           }
@@ -85,13 +85,13 @@ export async function listDevisCompact(req, res) {
       { $sort: { createdAt: -1 } },
       {
         $facet: {
-          meta:  [{ $count: "total" }],
+          meta: [{ $count: "total" }],
           items: [{ $skip: skip }, { $limit: limit }]
         }
       },
       {
         $project: {
-          total: { $ifNull: [ { $arrayElemAt: ["$meta.total", 0] }, 0 ] },
+          total: { $ifNull: [{ $arrayElemAt: ["$meta.total", 0] }, 0] },
           items: 1
         }
       }
@@ -117,27 +117,27 @@ export async function listDevisCompact(req, res) {
     });
   } catch (e) {
     console.error("listDevisCompact error:", e);
-    return res.status(500).json({ success:false, message:"Erreur serveur" });
+    return res.status(500).json({ success: false, message: "Erreur serveur" });
   }
 }
 export async function listDemandesCompact(req, res) {
   try {
-    const page  = Math.max(1, parseInt(req.query.page ?? "1", 10));
+    const page = Math.max(1, parseInt(req.query.page ?? "1", 10));
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit ?? "20", 10)));
-    const skip  = (page - 1) * limit;
-    const type  = (req.query.type || "all").toString().toLowerCase();
-    const qRaw  = (req.query.q || "").toString().trim();
+    const skip = (page - 1) * limit;
+    const type = (req.query.type || "all").toString().toLowerCase();
+    const qRaw = (req.query.q || "").toString().trim();
 
     const rx = qRaw ? new RegExp(qRaw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") : null;
 
     // نلمّ كل الكولكشنز
     const bases = [
       { model: DemandeCompression, t: "compression" },
-      { model: DemandeTraction,    t: "traction"    },
-      { model: DemandeTorsion,     t: "torsion"     },
-      { model: DemandeFil,         t: "fil"         },
-      { model: DemandeGrille,      t: "grille"      },
-      { model: DemandeAutre,       t: "autre"       },
+      { model: DemandeTraction, t: "traction" },
+      { model: DemandeTorsion, t: "torsion" },
+      { model: DemandeFil, t: "fil" },
+      { model: DemandeGrille, t: "grille" },
+      { model: DemandeAutre, t: "autre" },
     ];
 
     // نختار base pipeline من أول كولكشن ونعمل عليه $unionWith للباقي
@@ -145,16 +145,41 @@ export async function listDemandesCompact(req, res) {
     const unions = bases.slice(1);
 
     // helper: pipeline standard يطبّق على collection demande quelconque
+    // helper: pipeline standard pour n’importe quelle collection de demandes
     const commonProjection = (typeLiteral) => ([
+      // ✅ juste extraction locale, pas de $lookup ni autres changements
       {
-        // نحاول نخرّج devisNumero من deux formats محتملين
         $addFields: {
-          _devisNumero: {
-            $ifNull: ["$devisNumero", "$devis.numero"]
+          _devisNumero: { $ifNull: ["$devisNumero", "$devis.numero"] },
+
+          // first name candidates
+          _first: {
+            $ifNull: [
+              "$client.prenom",
+              { $ifNull: ["$client.firstName", { $ifNull: ["$prenom", "$firstName"] }] }
+            ]
           },
-          _clientNom: {
-            $ifNull: ["$client.nom", "$clientNom"]
+
+          // last name candidates
+          _last: {
+            $ifNull: [
+              "$client.nom",
+              { $ifNull: ["$client.lastName", { $ifNull: ["$nom", "$lastName"] }] }
+            ]
           },
+
+          // "Prénom Nom" (trim pour gérer valeurs manquantes)
+          _clientFull: {
+            $trim: {
+              input: {
+                $concat: [
+                  { $ifNull: ["$_first", ""] },
+                  " ",
+                  { $ifNull: ["$_last", ""] }
+                ]
+              }
+            }
+          }
         }
       },
       {
@@ -163,11 +188,12 @@ export async function listDemandesCompact(req, res) {
           demandeNumero: "$numero",
           type: { $literal: typeLiteral },
           devisNumero: "$_devisNumero",
-          client: "$_clientNom",
+          client: "$_clientFull",    // ← UNIQUEMENT Nom+Prénom
           date: "$createdAt",
         }
       }
     ]);
+
 
     // filtre dynamique (search + type)
     const mkMatch = (tLit) => {
@@ -210,13 +236,13 @@ export async function listDemandesCompact(req, res) {
       { $sort: { date: -1 } },
       {
         $facet: {
-          meta:  [{ $count: "total" }],
+          meta: [{ $count: "total" }],
           items: [{ $skip: skip }, { $limit: limit }],
         }
       },
       {
         $project: {
-          total: { $ifNull: [ { $arrayElemAt: ["$meta.total", 0] }, 0 ] },
+          total: { $ifNull: [{ $arrayElemAt: ["$meta.total", 0] }, 0] },
           items: 1
         }
       }
