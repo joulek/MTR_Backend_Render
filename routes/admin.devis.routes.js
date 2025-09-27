@@ -25,6 +25,7 @@ function toBuffer(maybeBinary) {
  * 📌 TRACTION
  * -------------------------
  */
+
 router.get("/devis/traction", auth, only("admin"), async (req, res) => {
   try {
     const items = await DevisTraction.find({})

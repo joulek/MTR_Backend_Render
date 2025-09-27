@@ -10,10 +10,10 @@ import {
   getByDemandeAdmin,
   adminPdfByNumero,            // 👈 add this
 } from "../controllers/devis.controller.js";
-import { listDevisCompact } from "../controllers/adminDevis.compact.controller.js";
+import { listDevisCompact ,listDemandesCompact} from "../controllers/adminDevis.compact.controller.js";
 
 const router = Router();
-
+router.get("/demandes/compact", listDemandesCompact);
 router.get("/devis/list", /*authAdmin,*/ listDevisCompact);
 
 router.get("/client/by-demande/:demandeId", auth, getDevisByDemandeClient);
