@@ -159,9 +159,10 @@ export async function listDevisCompact(req, res) {
 
 export async function listDemandesCompact(req, res) {
   try {
-    const page = Math.max(1, parseInt(req.query.page ?? "1", 10));
+    const page  = Math.max(1, parseInt(req.query.page ?? "1", 10));
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit ?? "20", 10)));
-    const skip = (page - 1) * limit;
+    const skip  = (page - 1) * limit;
+
     const type = (req.query.type || "all").toString().toLowerCase();
     const qRaw = (req.query.q || "").toString().trim();
 
@@ -169,80 +170,138 @@ export async function listDemandesCompact(req, res) {
 
     const bases = [
       { model: DemandeCompression, t: "compression" },
-      { model: DemandeTraction, t: "traction" },
-      { model: DemandeTorsion, t: "torsion" },
-      { model: DemandeFil, t: "fil" },
-      { model: DemandeGrille, t: "grille" },
-      { model: DemandeAutre, t: "autre" },
+      { model: DemandeTraction,    t: "traction" },
+      { model: DemandeTorsion,     t: "torsion" },
+      { model: DemandeFil,         t: "fil" },
+      { model: DemandeGrille,      t: "grille" },
+      { model: DemandeAutre,       t: "autre" },
     ];
 
-    const base = bases[0];
+    const base   = bases[0];
     const unions = bases.slice(1);
+
+    // ---- petits helpers communs d'aggregation ----
+    const mkMatch = () => {
+      if (!rx) return [];
+      return [{
+        $match: {
+          $or: [
+            { numero: rx },
+            { devisNumero: rx },
+            { "devis.numero": rx },
+            { "client.nom": rx },
+            { "client.prenom": rx },
+            { "client.lastName": rx },
+            { "client.firstName": rx },
+          ]
+        }
+      }];
+    };
 
     const commonProjection = (typeLiteral) => ([
       {
+        // Normalise les champs pour calculer nom/prenom + documents
         $addFields: {
-          // garder l'id pour construire l'URL PDF DDV
-          _id_keep: "$_id",
+          __keepId: "$_id",
 
-          _devisNumero: { $ifNull: ["$devisNumero", "$devis.numero"] },
+          // numéro devis possible dans deux emplacements
+          __devisNumero: { $ifNull: ["$devisNumero", "$devis.numero"] },
 
-          _first: {
+          // client.{prenom,nom,email,numTel} fusion depuis différents schémas
+          __client_prenom: {
             $ifNull: [
               "$client.prenom",
               { $ifNull: ["$client.firstName", { $ifNull: ["$prenom", "$firstName"] }] }
             ]
           },
-          _last: {
+          __client_nom: {
             $ifNull: [
               "$client.nom",
               { $ifNull: ["$client.lastName", { $ifNull: ["$nom", "$lastName"] }] }
             ]
           },
+          __client_email: {
+            $ifNull: ["$client.email", "$email"]
+          },
+          __client_numTel: {
+            $ifNull: ["$client.numTel", "$numTel"]
+          },
 
-          // simple bool: PDF DDV présent ?
-          _hasDemandePdf: { $ne: ["$demandePdf", null] },
+          // Présence du PDF DDV
+          __hasDemandePdf: { $ne: ["$demandePdf", null] },
+
+          // Map des documents -> (index, filename, mimetype, size, hasData)
+          // Utilise $map + $binarySize si dispo (MongoDB 5+). Si non dispo, on fera le size côté JS plus bas.
+          __documents: {
+            $cond: [
+              { $isArray: "$documents" },
+              {
+                $map: {
+                  input: "$documents",
+                  as: "d",
+                  in: {
+                    index: { $indexOfArray: ["$documents", "$$d"] },
+                    filename: "$$d.filename",
+                    mimetype: "$$d.mimetype",
+                    size: {
+                      $cond: [
+                        { $gt: [ { $type: "$$d.data" }, "missing" ] },
+                        // essaie $binarySize, sinon 0:
+                        { $cond: [
+                          { $eq: [ { $type: "$$d.data" }, "binData" ] },
+                          { $binarySize: "$$d.data" },
+                          0
+                        ]},
+                        0
+                      ]
+                    },
+                    hasData: {
+                      $and: [
+                        { $gt: [ { $type: "$$d.data" }, "missing" ] },
+                        { $eq: [ { $type: "$$d.data" }, "binData" ] },
+                        { $gt: [ { $binarySize: "$$d.data" }, 0 ] }
+                      ]
+                    }
+                  }
+                }
+              },
+              []
+            ]
+          }
         }
       },
       {
         $project: {
-          _id: "$_id_keep",                 // <-- garder _id
+          _id: "$__keepId",
           demandeNumero: "$numero",
           type: { $literal: typeLiteral },
-          devisNumero: "$_devisNumero",
-          client: {
+          devisNumero: "$__devisNumero",
+          clientName: {
             $trim: {
               input: {
                 $concat: [
-                  { $ifNull: ["$_first", ""] },
+                  { $ifNull: ["$__client_prenom", ""] },
                   " ",
-                  { $ifNull: ["$_last", ""] }
+                  { $ifNull: ["$__client_nom", ""] }
                 ]
               }
             }
           },
+          client: {
+            prenom: { $ifNull: ["$__client_prenom", ""] },
+            nom:    { $ifNull: ["$__client_nom", ""] },
+            email:  { $ifNull: ["$__client_email", ""] },
+            numTel: { $ifNull: ["$__client_numTel", ""] },
+          },
           date: "$createdAt",
-          hasDemandePdf: "$_hasDemandePdf", // <-- bool pour front
+          hasDemandePdf: "$__hasDemandePdf",
+          documents: "$__documents"
         }
       }
     ]);
 
-    const mkMatch = (tLit) => {
-      const m = {};
-      if (rx) {
-        m.$or = [
-          { numero: rx },
-          { devisNumero: rx },
-          { "devis.numero": rx },
-          { "client.nom": rx },
-          { "client.prenom": rx },
-        ];
-      }
-      return Object.keys(m).length ? [{ $match: m }] : [];
-    };
-
     const basePipeline = [
-      ...mkMatch(base.t),
+      ...mkMatch(),
       ...commonProjection(base.t),
     ];
 
@@ -250,7 +309,7 @@ export async function listDemandesCompact(req, res) {
       $unionWith: {
         coll: model.collection.name,
         pipeline: [
-          ...mkMatch(t),
+          ...mkMatch(),
           ...commonProjection(t),
         ]
       }
@@ -276,21 +335,46 @@ export async function listDemandesCompact(req, res) {
     ];
 
     const [agg] = await base.model.aggregate(finalPipeline).allowDiskUse(true);
+    const rows = agg?.items || [];
 
-    const items = (agg?.items || []).map((d) => ({
-      _id: d._id,
-      demandeNumero: d.demandeNumero,
-      type: d.type,
-      devisNumero: d.devisNumero || null,
-      client: d.client || "",
-      date: d.date,
+    // Post-traitement JS (au cas où $binarySize n’est pas dispo côté cluster)
+    const items = rows.map((d) => {
+      const docs = (d.documents || []).map((doc, idx) => {
+        // recalcul size/hasData si null/0:
+        let size = doc.size;
+        let hasData = !!doc.hasData;
+        // si tu veux renforcer en lisant depuis le doc original, laisse comme ça (agrégat multi-colls = on n'a pas le binaire ici)
+        // donc on garde les métadonnées calculées par l'agg; fallback à 0/false:
+        size = Number.isFinite(size) ? size : 0;
+        hasData = !!hasData;
 
-      // 🔗 lien PDF DDV si dispo, sinon null
-      ddvPdf: d.hasDemandePdf ? `${ORIGIN}/api/devis/${d.type}/${d._id}/pdf` : null,
+        return {
+          index: Number.isFinite(doc.index) ? doc.index : idx,
+          filename: doc.filename || "",
+          mimetype: doc.mimetype || "",
+          size,
+          hasData
+        };
+      });
 
-      // ancien lien PDF du devis (si un devis existe)
-      devisPdf: d.devisNumero ? `${ORIGIN}/files/devis/${d.devisNumero}.pdf` : null,
-    }));
+      const ddvPdf  = d.hasDemandePdf ? `${ORIGIN}/api/devis/${d.type}/${d._id}/pdf` : null;
+      const devisPdf = d.devisNumero ? `${ORIGIN}/files/devis/${d.devisNumero}.pdf` : null;
+
+      return {
+        _id: d._id,
+        demandeNumero: d.demandeNumero,
+        type: d.type,
+        devisNumero: d.devisNumero || null,
+        // ✨ ce que tu voulais: nom/prénom visibles + objet client si besoin
+        clientName: d.clientName || "",
+        client: d.client || { prenom: "", nom: "", email: "", numTel: "" },
+        date: d.date,
+        hasDemandePdf: !!d.hasDemandePdf,
+        ddvPdf,
+        devisPdf,
+        documents: docs
+      };
+    });
 
     return res.json({
       success: true,
