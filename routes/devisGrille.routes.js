@@ -36,7 +36,7 @@ router.get("/paginated", auth, only("admin"), async (req, res) => {
       { $unwind: { path: "$u", preserveNullAndEmptyArrays: true } },
       {
         $addFields: {
-          clientFull: { $trim: { input: { $concat: [{ $ifNull:["$u.prenom",""] }," ",{ $ifNull:["$u.nom",""] }] } } }
+          clientFull: { $trim: { input: { $concat: [{ $ifNull: ["$u.prenom", ""] }, " ", { $ifNull: ["$u.nom", ""] }] } } }
         }
       },
       ...(regex ? [{ $match: { $or: [{ numero: regex }, { clientFull: regex }] } }] : []),
@@ -75,7 +75,8 @@ router.get("/paginated", auth, only("admin"), async (req, res) => {
                 hasDemandePdf: {
                   $and: [
                     { $ne: ["$demandePdf", null] },
-                    { $gt: [{ $binarySize: { $ifNull: ["$demandePdf.data", []] } }, 0] }
+                    { $ne: ["$demandePdf.data", null] },
+                    { $gt: [{ $binarySize: "$demandePdf.data" }, 0] }
                   ]
                 }
               }
@@ -94,7 +95,12 @@ router.get("/paginated", auth, only("admin"), async (req, res) => {
                       filename: "$$d.filename",
                       size: {
                         $cond: [
-                          { $gt: [{ $ifNull: ["$$d.data", null] }, null] },
+                          {
+                            $and: [
+                              { $ne: ["$$d.data", null] },
+                              { $eq: [{ $isArray: "$$d.data" }, false] } // data ne doit pas être un array
+                            ]
+                          },
                           { $binarySize: "$$d.data" },
                           0
                         ]
@@ -102,6 +108,7 @@ router.get("/paginated", auth, only("admin"), async (req, res) => {
                     }
                   }
                 },
+
                 user: { _id: "$u._id", prenom: "$u.prenom", nom: "$u.nom" },
                 devis: 1
               }
