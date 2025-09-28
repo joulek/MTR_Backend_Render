@@ -6,6 +6,8 @@ import mongoose from "mongoose";
 
 import Devis from "../models/Devis.js";
 
+
+
 // Demandes (pour créer un devis depuis une demande)
 import DemandeDevisAutre from "../models/DevisAutre.js";
 import DemandeDevisCompression from "../models/DevisCompression.js";
@@ -367,21 +369,18 @@ export const getDevisByDemande = async (req, res) => {
   }
 };
 
-// === CRÉER UN DEVIS À PARTIR DE PLUSIEURS DEMANDES (même client) ===
+
+
 export const createFromDemande = async (req, res) => {
   try {
     const { demandeIds = [], lines = [], sendEmail = true } = req.body;
 
-    // utils محليّة
+    /* -------------------- Utils -------------------- */
     const ORIGIN = `${req.protocol}://${req.get("host")}`;
     const toNum = (v) => +Number(v || 0).toFixed(3);
-    const SEG_FOR_TYPE = (t) => {
-      // عدّلها لو راوت “fil” عندك اسمه fildresse
-      if (t === "fildresse") return "fil";
-      return t || "autre";
-    };
+    const SEG_FOR_TYPE = (t) => (t === "fildresse" ? "fil" : (t || "autre"));
 
-    // 0) Validation
+    /* -------------------- 0) Validation -------------------- */
     if (!Array.isArray(demandeIds) || !demandeIds.length) {
       return res.status(400).json({ success: false, message: "demandeIds[] requis" });
     }
@@ -389,17 +388,19 @@ export const createFromDemande = async (req, res) => {
       return res.status(400).json({ success: false, message: "lines[] requises" });
     }
 
-    // 1) Charger demandes (multi-type)
-    const loaded = [];
-    for (const id of demandeIds) {
-      const found = await findDemandeAny(id);
-      if (!found) {
-        return res.status(404).json({ success: false, message: `Demande introuvable: ${id}` });
-      }
-      loaded.push(found); // { type, doc }
-    }
+    /* -------------------- 1) Charger demandes (en parallèle) -------------------- */
+    const loaded = await Promise.all(
+      demandeIds.map(async (id) => {
+        const found = await findDemandeAny(id);
+        if (!found) throw new Error(`Demande introuvable: ${id}`);
+        return found; // { type, doc }
+      })
+    ).catch((err) => {
+      return res.status(404).json({ success: false, message: err.message });
+    });
+    if (res.headersSent) return;
 
-    // 2) Même client
+    /* -------------------- 2) Vérifier même client -------------------- */
     const firstUserId = (loaded[0].doc?.user?._id || loaded[0].doc?.user)?.toString?.();
     const sameClient = loaded.every((f) => (f.doc?.user?._id || f.doc?.user)?.toString?.() === firstUserId);
     if (!sameClient) {
@@ -410,35 +411,28 @@ export const createFromDemande = async (req, res) => {
     }
     const demandeUser = loaded[0].doc.user;
 
-    // Maps aide
     const numeroById = new Map(loaded.map((f) => [String(f.doc._id), f.doc.numero]));
 
-    // 3) Lignes d’articles
+    /* -------------------- 3) Construire les lignes -------------------- */
+    // On charge les articles en parallèle pour éviter N requêtes en série
+    const articleIds = [...new Set(lines.map((ln) => ln?.articleId).filter(Boolean))];
+    const arts = await Article.find({ _id: { $in: articleIds } });
+    const artsMap = new Map(arts.map((a) => [String(a._id), a]));
+
     const itemDocs = [];
     for (const ln of lines) {
-      const {
-        demandeId,
-        demandeNumero,
-        articleId,
-        qty = 1,
-        remisePct = 0,
-        tvaPct = 19,
-      } = ln || {};
-
+      const { demandeId, demandeNumero, articleId, qty = 1, remisePct = 0, tvaPct = 19 } = ln || {};
       if (!articleId) {
         return res.status(400).json({ success: false, message: "Chaque ligne doit contenir articleId" });
       }
-
-      const art = await Article.findById(articleId);
+      const art = artsMap.get(String(articleId));
       if (!art) {
-        return res.status(404).json({ success: false, message: "Article introuvable pour une ligne" });
+        return res.status(404).json({ success: false, message: `Article introuvable: ${articleId}` });
       }
 
-      // رقم الطلب الخاص بهذه السطر
+      // DDV pour cette ligne
       let numFromLine = null;
-      if (demandeId && mongoose.isValidObjectId(demandeId)) {
-        numFromLine = numeroById.get(String(demandeId));
-      }
+      if (demandeId && mongoose.isValidObjectId(demandeId)) numFromLine = numeroById.get(String(demandeId));
       if (!numFromLine && typeof demandeId === "string" && demandeId.toUpperCase().startsWith("DDV")) {
         numFromLine = demandeId.toUpperCase();
       }
@@ -467,7 +461,7 @@ export const createFromDemande = async (req, res) => {
       return res.status(400).json({ success: false, message: "Aucune ligne valide" });
     }
 
-    // 4) Totaux
+    /* -------------------- 4) Totaux -------------------- */
     const mtht = +itemDocs.reduce((s, it) => s + (it.totalHT || 0), 0).toFixed(3);
     const mtnetht = mtht;
     const mttva = +itemDocs.reduce((s, it) => s + it.totalHT * (toNum(it.tvaPct) / 100), 0).toFixed(3);
@@ -475,10 +469,10 @@ export const createFromDemande = async (req, res) => {
     const timbre = 0;
     const mttc = +(mtnetht + mttva + mfodec + timbre).toFixed(3);
 
-    // 5) Numéro du devis
+    /* -------------------- 5) Numéro du devis -------------------- */
     const numero = await nextDevisNumber();
 
-    // 6) Créer devis “central”
+    /* -------------------- 6) Créer le devis (immédiat) -------------------- */
     const devis = await Devis.create({
       numero,
       demandeId: loaded[0].doc._id,
@@ -497,78 +491,87 @@ export const createFromDemande = async (req, res) => {
       meta: {
         demandes: loaded.map((x) => ({ id: x.doc._id, numero: x.doc.numero, type: x.type })),
       },
+      // on pourra ajouter plus tard: pdfUrl, emailStatus, etc.
     });
 
-    // 7) PDF (robuste) + fallback
-    let pdfUrl = null;
-    try {
-      const { filename } = await buildDevisPDF(devis);
-      const pdfPath = path.resolve(process.cwd(), "storage/devis", filename);
-      // تأكّد من وجود static files /files/devis/* في السيرفر
-      pdfUrl = `${ORIGIN}/files/devis/${filename}`;
-      // ممكن تحتاج تحفظ pdfPath لو تحب تبعت attachment في الإيميل
-    } catch (err) {
-      // fallback لفتح PDF الطلب الأول
-      const seg = SEG_FOR_TYPE(loaded[0].type);
-      pdfUrl = `${ORIGIN}/api/devis/${seg}/${loaded[0].doc._id}/pdf`;
-      console.error("buildDevisPDF failed, using fallback:", err?.message || err);
-    }
-
-    // 8) Email (non-bloquant)
-    let email = { sent: false, error: null };
-    if (sendEmail && devis.client?.email) {
-      try {
-        const transport = makeTransport();
-
-        const DEMANDE_ROUTE = {
-          autre: "autre",
-          compression: "compression",
-          traction: "traction",
-          torsion: "torsion",
-          fil: "fil",    // غيّرها إلى fildresse إذا هذا هو الراوت عندك
-          grille: "grille",
-        };
-        const demandesLinks = loaded.map((x) => {
-          const seg = DEMANDE_ROUTE[x.type] || SEG_FOR_TYPE(x.type);
-          return { numero: x.doc.numero, url: `${ORIGIN}/api/devis/${seg}/${x.doc._id}/pdf` };
-        });
-        const subject = `Votre devis ${devis.numero}`;
-        const textBody =
-          `Bonjour${devis.client?.nom ? " " + devis.client.nom : ""},\n\n` +
-          `Veuillez trouver votre devis: ${pdfUrl}\n` +
-          (demandesLinks.length ? `Demandes liées: ${demandesLinks.map(d => d.numero).join(", ")}\n` : "") +
-          `\nCordialement,\nMTR`;
-
-        await transport.sendMail({
-          from: process.env.MAIL_FROM || "devis@mtr.tn",
-          to: devis.client.email,
-          subject,
-          text: textBody,
-          // بإمكانك إضافة html و/أو attachment الـPDF النهائي إذا متوفر
-        });
-        email.sent = true;
-      } catch (err) {
-        email = {
-          sent: false,
-          error: { code: err?.code, command: err?.command, message: err?.message },
-        };
-        // لا نسقط الراوت
-        console.error("sendMail failed:", err);
-      }
-    }
-
-    return res.json({
+    /* -------------------- 7) Répondre tout de suite -------------------- */
+    // On répond sans attendre le PDF ni l’e-mail
+    res.status(201).json({
       success: true,
       devis: { _id: devis._id, numero: devis.numero },
-      pdf: pdfUrl,
-      email,
+      pdf: null,                 // sera rempli plus tard
+      email: { queued: !!(sendEmail && devis.client?.email) },
     });
+
+    /* -------------------- 8) Tâches asynchrones non-bloquantes -------------------- */
+    // Lancer en arrière-plan après la réponse
+    setImmediate(async () => {
+      try {
+        // 8.a) PDF robuste + fallback
+        let pdfUrl = null;
+        try {
+          const { filename } = await buildDevisPDF(devis);
+          // Assure-toi que /files/devis/* est servi en statique par ton serveur
+          pdfUrl = `${ORIGIN}/files/devis/${filename}`;
+        } catch (err) {
+          const seg = SEG_FOR_TYPE(loaded[0].type);
+          pdfUrl = `${ORIGIN}/api/devis/${seg}/${loaded[0].doc._id}/pdf`;
+          console.error("buildDevisPDF failed, using fallback:", err?.message || err);
+        }
+
+        // 8.b) Sauvegarder l’URL PDF sur le devis
+        await Devis.findByIdAndUpdate(devis._id, { $set: { pdfUrl } }).catch(() => {});
+        
+        // 8.c) Envoi d’e-mail (optionnel)
+        if (sendEmail && devis.client?.email) {
+          try {
+            const transport = makeTransport();
+            const DEMANDE_ROUTE = {
+              autre: "autre",
+              compression: "compression",
+              traction: "traction",
+              torsion: "torsion",
+              fil: "fil", // adapte si ton route réel est "fildresse"
+              grille: "grille",
+            };
+            const demandesLinks = loaded.map((x) => {
+              const seg = DEMANDE_ROUTE[x.type] || SEG_FOR_TYPE(x.type);
+              return { numero: x.doc.numero, url: `${ORIGIN}/api/devis/${seg}/${x.doc._id}/pdf` };
+            });
+
+            const subject = `Votre devis ${devis.numero}`;
+            const textBody =
+              `Bonjour${devis.client?.nom ? " " + devis.client.nom : ""},\n\n` +
+              `Voici votre devis: ${pdfUrl}\n` +
+              (demandesLinks.length ? `Demandes liées: ${demandesLinks.map(d => d.numero).join(", ")}\n` : "") +
+              `\nCordialement,\nMTR`;
+
+            await transport.sendMail({
+              from: process.env.MAIL_FROM || "devis@mtr.tn",
+              to: devis.client.email,
+              subject,
+              text: textBody,
+            });
+            // Optionnel: marquer email comme envoyé
+            await Devis.findByIdAndUpdate(devis._id, { $set: { emailSentAt: new Date() } }).catch(() => {});
+          } catch (err) {
+            console.error("sendMail failed:", err);
+            await Devis.findByIdAndUpdate(devis._id, {
+              $set: { emailError: { message: err?.message, code: err?.code, command: err?.command } }
+            }).catch(() => {});
+          }
+        }
+      } catch (bgErr) {
+        console.error("Background job (PDF/Mail) error:", bgErr);
+      }
+    });
+
   } catch (e) {
     console.error("createFromDemande:", e);
-    return res.status(500).json({
-      success: false,
-      message: "Erreur création devis (multi)",
-    });
+    if (!res.headersSent) {
+      return res.status(500).json({ success: false, message: "Erreur création devis (multi)" });
+    }
   }
 };
+
 
