@@ -59,10 +59,20 @@ export function setAuthCookies(res, { token, role = "client", remember = false }
 
 /** Efface proprement les cookies (mêmes attributs que set) */
 export function clearAuthCookies(res) {
-  const base = baseCookieOpts(0);
-  const expired = { ...base, expires: new Date(0) };
-  res.clearCookie("token", expired);
-  res.clearCookie("role", expired);
+  const opts = {
+    path: "/",
+    httpOnly: true,
+    sameSite: "lax",
+    secure: true,
+  };
+
+  // cookies "publics"
+  res.clearCookie("token", { ...opts, httpOnly: false });
+  res.clearCookie("role", { ...opts, httpOnly: false });
+
+  // cookies de session express/passport
+  res.clearCookie("connect.sid", opts);
+  res.clearCookie("sid", opts);
 }
 
 /* ────────────────────────────────────────────────────────────────────────── */

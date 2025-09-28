@@ -73,9 +73,24 @@ router.post("/login", async (req, res) => {
 
 /* -------------------------------- Logout ---------------------------------- */
 router.post("/logout", (req, res) => {
-  clearAuthCookies(res);
-  res.json({ success: true, message: "Déconnecté" });
+  try {
+    // si tu utilises passport
+    if (req.logout) {
+      req.logout(() => {});
+    }
+
+    // détruire session serveur
+    if (req.session) {
+      req.session.destroy(() => {});
+    }
+
+    clearAuthCookies(res);
+    return res.status(200).json({ success: true, message: "Déconnecté" });
+  } catch (e) {
+    return res.status(200).json({ success: true, message: "Déconnecté" });
+  }
 });
+
 
 /* -------------------------------- WhoAmI ---------------------------------- */
 router.get("/whoami", auth, (req, res) => {
