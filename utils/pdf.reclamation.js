@@ -20,8 +20,12 @@ export async function buildReclamationPDF(rec) {
       const TABLE_W    = 515;
       const PAGE_RIGHT = PAGE_LEFT + TABLE_W;
 
-      const LOGO_W = 120; // taille logo
-      const TOP_Y  = 4;   // 🔼 logo un peu plus haut (avant: 10)
+      // --- Réglages d'alignement visuel
+      const LOGO_W = 120;       // largeur cible du logo
+      const LOGO_H = 60;        // hauteur visuelle approx. du logo
+      const TOP_Y  = 0;         // colle un peu plus en haut
+      const TITLE_SIZE = 30;    // taille du titre
+      const TITLE_Y = TOP_Y + 18; // position du titre (bandeau commun logo+titre)
 
       const safe = (s = "") => String(s ?? "").trim() || "—";
       const dateStr = dayjs(rec?.createdAt || Date.now()).format("DD/MM/YYYY HH:mm:ss");
@@ -50,26 +54,27 @@ export async function buildReclamationPDF(rec) {
         return y;
       };
 
-      /* ======================= HEADER ======================= */
+      /* ======================= ENTÊTE ======================= */
 
-      // 1) Logo (un peu plus haut)
+      // 1) Logo — on positionne pour qu'il tombe sur la même "ligne" visuelle que le titre
+      //    (centre vertical du logo ≈ centre de la ligne du titre)
       try {
         const logoPath = path.resolve(process.cwd(), "assets/logo.png");
-        doc.image(logoPath, PAGE_LEFT, TOP_Y, {
-          width: LOGO_W, height: LOGO_W, fit: [LOGO_W, LOGO_W],
+        const logoY = TITLE_Y - (LOGO_H - TITLE_SIZE) / 2 - 2; // petit offset pour l’œil
+        doc.image(logoPath, PAGE_LEFT, logoY, {
+          width: LOGO_W, height: LOGO_H, fit: [LOGO_W, LOGO_H]
         });
       } catch {}
 
       // 2) Titre centré
-      const titleY = TOP_Y + 26; // équilibré avec logo
       doc
         .font("Helvetica-Bold")
-        .fontSize(26)
+        .fontSize(TITLE_SIZE)
         .fillColor(NAVY)
-        .text("Réclamation", 0, titleY, { width: doc.page.width, align: "center" });
+        .text("Réclamation", 0, TITLE_Y, { width: doc.page.width, align: "center" });
 
-      // 3) Réf / Date — un peu plus bas que précédemment
-      const metaY = titleY + 16; // 🔽 avant: +6
+      // 3) Réf / Date — on les DESCEND nettement sous le titre
+      const metaY = TITLE_Y + 28; // ↓ plus bas
       const refLabel = "Réf : ";
       const refValue = safe(rec?.numero);
 
@@ -91,24 +96,21 @@ export async function buildReclamationPDF(rec) {
       doc.font("Helvetica-Bold").fontSize(10);
       const dateValueW = doc.widthOfString(dateValue);
 
-      const dateY = metaY + 20; // 🔽 avant: +16
+      const dateY = metaY + 20; // ↓ encore un cran
       const xDateValue = PAGE_RIGHT - dateValueW;
       const xDateLabel = xDateValue - dateLabelW;
 
       doc.font("Helvetica").fontSize(10).text(dateLabel, xDateLabel, dateY);
       doc.font("Helvetica-Bold").fontSize(10).text(dateValue, xDateValue, dateY);
 
-      // ligne de séparation
-      doc
-        .moveTo(PAGE_LEFT, dateY + 22) // 🔽 un peu plus d’air
-        .lineTo(PAGE_RIGHT, dateY + 22)
-        .strokeColor(BORDER)
-        .lineWidth(1)
-        .stroke();
+      // ligne de séparation sous le bloc header
+      const headerRuleY = dateY + 22;
+      doc.moveTo(PAGE_LEFT, headerRuleY).lineTo(PAGE_RIGHT, headerRuleY)
+         .strokeColor(BORDER).lineWidth(1).stroke();
 
-      /* ======================= BLOC CLIENT (descendu un peu) ======================= */
+      /* ======================= CLIENT (descendu) ======================= */
 
-      const blockTop = dateY + 39; // 🔽 avant: +28
+      const blockTop = headerRuleY + 18; // ↓ encore de l’air avant "Client"
       let nextY = drawSectionTitle("Client", PAGE_LEFT, blockTop, TABLE_W);
 
       const CLIENT_H = 120;
@@ -127,8 +129,8 @@ export async function buildReclamationPDF(rec) {
         TABLE_W - 20
       );
 
-      /* ======================= BLOC COMMANDE ======================= */
-      const CARD_SPACE_Y = 24; // un peu plus d’espace
+      /* ======================= COMMANDE ======================= */
+      const CARD_SPACE_Y = 26; // espace un peu plus large entre cartes
       const CMD_H = 140;
 
       nextY = clientRectY + CLIENT_H + CARD_SPACE_Y;
@@ -150,7 +152,7 @@ export async function buildReclamationPDF(rec) {
         TABLE_W - 20
       );
 
-      /* ======================= BLOC RÉCLAMATION ======================= */
+      /* ======================= RÉCLAMATION ======================= */
       const afterBlocksY = cmdRectY + CMD_H + CARD_SPACE_Y;
 
       let ry = drawSectionTitle("Réclamation", PAGE_LEFT, afterBlocksY, TABLE_W);
