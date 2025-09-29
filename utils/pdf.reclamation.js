@@ -12,23 +12,22 @@ export async function buildReclamationPDF(rec) {
       doc.on("end", () => resolve(Buffer.concat(chunks)));
 
       /* --------- Constantes de mise en page --------- */
-      const NAVY = "#003366",
-        LIGHT = "#F3F3F8",
-        BORDER = "#C8C8D8";
+      const NAVY  = "#003366",
+            LIGHT = "#F3F3F8",
+            BORDER = "#C8C8D8";
 
       const PAGE_LEFT = 40;               // marge gauche (= doc.options.margin)
-      const TABLE_W = 515;                // largeur de zone utile
+      const TABLE_W   = 515;              // largeur utile
       const PAGE_RIGHT = PAGE_LEFT + TABLE_W;
       const CARD_SPACE_Y = 28;
+      const LOGO_W = 130;                 // <-- taille logo (modifier si besoin)
 
       /* --------- Helpers --------- */
       const safe = (s = "") => {
         const v = String(s ?? "").trim();
         return v || "—";
       };
-      const dateStr = dayjs(rec?.createdAt || Date.now()).format(
-        "DD/MM/YYYY HH:mm:ss"
-      );
+      const dateStr = dayjs(rec?.createdAt || Date.now()).format("DD/MM/YYYY HH:mm:ss");
 
       const u = rec?.user || {};
       const c = rec?.commande || {};
@@ -47,22 +46,11 @@ export async function buildReclamationPDF(rec) {
         return y + 20;
       };
 
-      const drawKeyValue = (
-        pairs,
-        x,
-        y,
-        w,
-        lineH = 18,
-        labelW = 95
-      ) => {
+      const drawKeyValue = (pairs, x, y, w, lineH = 18, labelW = 95) => {
         doc.fontSize(10).fillColor("#000");
         pairs.forEach(([label, value]) => {
-          doc
-            .font("Helvetica-Bold")
-            .text(label, x, y, { width: labelW, align: "left" });
-          doc
-            .font("Helvetica")
-            .text(value, x + labelW, y, { width: w - labelW, align: "left" });
+          doc.font("Helvetica-Bold").text(label, x, y, { width: labelW, align: "left" });
+          doc.font("Helvetica").text(value, x + labelW, y, { width: w - labelW, align: "left" });
           y += lineH;
         });
         return y;
@@ -71,71 +59,76 @@ export async function buildReclamationPDF(rec) {
       /* ======================= HEADER ======================= */
       const topY = PAGE_LEFT;
 
-      // Logo
+      // Logo (agrandi)
       try {
         const logoPath = path.resolve(process.cwd(), "assets/logo.png");
         doc.image(logoPath, PAGE_LEFT, topY - 10, {
-          width: 90,
-          height: 90,
-          fit: [90, 90],
+          width: LOGO_W,
+          height: LOGO_W,
+          fit: [LOGO_W, LOGO_W],
         });
       } catch {
         /* ignore si logo manquant */
       }
 
-      // Titre (centré)
+      // Titre centré en bleu marine
       doc
         .font("Helvetica-Bold")
-        .fontSize(18)
-        .fillColor("#000")
-        .text("Réclamation client", 0, topY + 6, { align: "center" });
+        .fontSize(22)
+        .fillColor(NAVY)
+        .text("Réclamation client", 0, topY + 4, { align: "center" });
 
-      // Métadonnées (Réf / Date) complètement à droite
-      const metaBoxX = PAGE_LEFT;
-      const metaBoxW = TABLE_W;
-      const metaY = topY + 42;
+      // Métadonnées (Réf / Date) à droite — sans chevauchement
+      const metaY = topY + 44;
 
-      // Ligne: "Réf : <numero>" alignée à droite
-      doc
-        .font("Helvetica")
-        .fontSize(10)
-        .fillColor("#000")
-        .text("Réf : ", metaBoxX, metaY, {
-          width: metaBoxW,
-          align: "right",
-          continued: true, // reste sur la même ligne
-        })
-        .font("Helvetica-Bold")
-        .text(safe(rec?.numero), {
-          width: metaBoxW,
-          align: "right",
-        });
+      // Référence (label normal + valeur en gras), alignée à droite
+      const refLabel = "Réf : ";
+      const refValue = safe(rec?.numero);
 
-      // Ligne: "Date : <dateStr>" alignée à droite
-      doc
-        .font("Helvetica")
-        .text("Date : ", metaBoxX, metaY + 16, {
-          width: metaBoxW,
-          align: "right",
-          continued: true,
-        })
-        .font("Helvetica-Bold")
-        .text(dateStr, {
-          width: metaBoxW,
-          align: "right",
-        });
+      // On mesure d'abord les largeurs pour placer au pixel près
+      const refValueWidth = (() => {
+        doc.font("Helvetica-Bold").fontSize(10);
+        return doc.widthOfString(refValue);
+      })();
+      const refLabelWidth = (() => {
+        doc.font("Helvetica").fontSize(10);
+        return doc.widthOfString(refLabel);
+      })();
+
+      const refValueX = PAGE_RIGHT - refValueWidth;      // valeur collée à droite
+      const refLabelX = refValueX - refLabelWidth;       // label à gauche de la valeur
+
+      doc.font("Helvetica").fontSize(10).fillColor("#000").text(refLabel, refLabelX, metaY);
+      doc.font("Helvetica-Bold").fontSize(10).text(refValue, refValueX, metaY);
+
+      // Date (label normal + valeur en gras), alignée à droite et sous la Réf
+      const dateLabel = "Date : ";
+      const dateValue = dateStr;
+
+      const dateValueWidth = (() => {
+        doc.font("Helvetica-Bold").fontSize(10);
+        return doc.widthOfString(dateValue);
+      })();
+      const dateLabelWidth = (() => {
+        doc.font("Helvetica").fontSize(10);
+        return doc.widthOfString(dateLabel);
+      })();
+
+      const dateY = metaY + 18; // interligne confortable
+      const dateValueX = PAGE_RIGHT - dateValueWidth;
+      const dateLabelX = dateValueX - dateLabelWidth;
+
+      doc.font("Helvetica").fontSize(10).text(dateLabel, dateLabelX, dateY);
+      doc.font("Helvetica-Bold").fontSize(10).text(dateValue, dateValueX, dateY);
 
       /* ======================= BLOC CLIENT ======================= */
-      const blockTop = topY + 90;
+      const blockTop = topY + Math.max(LOGO_W, 90) + 18;
 
       const CLIENT_H = 120;
       let nextY = drawSectionTitle("Client", PAGE_LEFT, blockTop, TABLE_W);
       const clientRectY = nextY;
 
-      doc
-        .rect(PAGE_LEFT, clientRectY, TABLE_W, CLIENT_H)
-        .strokeColor(BORDER)
-        .stroke();
+      doc.rect(PAGE_LEFT, clientRectY, TABLE_W, CLIENT_H).strokeColor(BORDER).stroke();
 
       drawKeyValue(
         [
@@ -153,27 +146,16 @@ export async function buildReclamationPDF(rec) {
       const CMD_H = 140;
       nextY = clientRectY + CLIENT_H + CARD_SPACE_Y;
 
-      const cmdTitleBottom = drawSectionTitle(
-        "Commande",
-        PAGE_LEFT,
-        nextY,
-        TABLE_W
-      );
+      const cmdTitleBottom = drawSectionTitle("Commande", PAGE_LEFT, nextY, TABLE_W);
       const cmdRectY = cmdTitleBottom;
 
-      doc
-        .rect(PAGE_LEFT, cmdRectY, TABLE_W, CMD_H)
-        .strokeColor(BORDER)
-        .stroke();
+      doc.rect(PAGE_LEFT, cmdRectY, TABLE_W, CMD_H).strokeColor(BORDER).stroke();
 
       drawKeyValue(
         [
           ["Type doc", safe(c.typeDoc)],
           ["Numéro", safe(c.numero)],
-          [
-            "Date livr.",
-            c.dateLivraison ? dayjs(c.dateLivraison).format("DD/MM/YYYY") : "—",
-          ],
+          ["Date livr.", c.dateLivraison ? dayjs(c.dateLivraison).format("DD/MM/YYYY") : "—"],
           ["Réf prod.", safe(c.referenceProduit)],
           ["Quantité", String(c.quantite ?? "—")],
         ],
@@ -198,8 +180,6 @@ export async function buildReclamationPDF(rec) {
         ry + 8,
         TABLE_W - 20
       );
-
-      // (Pas de champ Description pour le moment)
 
       /* ======================= FIN ======================= */
       doc.end();
