@@ -32,10 +32,10 @@ function pickPreciseField(obj, keys) {
 // fallback: extraction depuis description "Précisez la nature: X | Précisez votre attente: Y"
 function extractFromDescription(desc = "") {
   const s = String(desc || "");
-  const mNature  = s.match(/Précisez\s+la\s+nature\s*:\s*([^|]+?)(?:\||$)/i);
+  const mNature = s.match(/Précisez\s+la\s+nature\s*:\s*([^|]+?)(?:\||$)/i);
   const mAttente = s.match(/Précisez\s+votre\s+attente\s*:\s*([^|]+?)(?:\||$)/i);
   return {
-    natureTxt:  mNature  ? mNature[1].trim()  : undefined,
+    natureTxt: mNature ? mNature[1].trim() : undefined,
     attenteTxt: mAttente ? mAttente[1].trim() : undefined,
   };
 }
@@ -69,7 +69,7 @@ export const createReclamation = async (req, res) => {
         numero: req.body["commande[numero]"] || req.body?.commande?.numero,
         dateLivraison: toDate(
           req.body["commande[dateLivraison]"] ||
-            req.body?.commande?.dateLivraison
+          req.body?.commande?.dateLivraison
         ),
         referenceProduit:
           req.body["commande[referenceProduit]"] ||
@@ -101,13 +101,13 @@ export const createReclamation = async (req, res) => {
       ]);
 
       // si Autre → remplacer par le texte libre
-      if (isOther(nature)  && precisezNature)  nature  = precisezNature;
+      if (isOther(nature) && precisezNature) nature = precisezNature;
       if (isOther(attente) && precisezAttente) attente = precisezAttente;
 
       // fallback depuis description si nécessaire
       if (isOther(nature) || isOther(attente)) {
         const { natureTxt, attenteTxt } = extractFromDescription(description);
-        if (isOther(nature)  && !precisezNature  && natureTxt)  nature  = natureTxt;
+        if (isOther(nature) && !precisezNature && natureTxt) nature = natureTxt;
         if (isOther(attente) && !precisezAttente && attenteTxt) attente = attenteTxt;
       }
 
@@ -132,15 +132,15 @@ export const createReclamation = async (req, res) => {
       description = b.description;
 
       // textes libres si présents
-      precisezNature  = pickPreciseField(b, ["precisezNature","natureAutre","natureTexte","nature_precise"]);
-      precisezAttente = pickPreciseField(b, ["precisezAttente","attenteAutre","attenteTexte","attente_precise"]);
+      precisezNature = pickPreciseField(b, ["precisezNature", "natureAutre", "natureTexte", "nature_precise"]);
+      precisezAttente = pickPreciseField(b, ["precisezAttente", "attenteAutre", "attenteTexte", "attente_precise"]);
 
-      if (isOther(nature)  && precisezNature)  nature  = precisezNature;
+      if (isOther(nature) && precisezNature) nature = precisezNature;
       if (isOther(attente) && precisezAttente) attente = precisezAttente;
 
       if (isOther(nature) || isOther(attente)) {
         const { natureTxt, attenteTxt } = extractFromDescription(description);
-        if (isOther(nature)  && !precisezNature  && natureTxt)  nature  = natureTxt;
+        if (isOther(nature) && !precisezNature && natureTxt) nature = natureTxt;
         if (isOther(attente) && !precisezAttente && attenteTxt) attente = attenteTxt;
       }
 
@@ -148,10 +148,10 @@ export const createReclamation = async (req, res) => {
         piecesJointes = b.piecesJointes.map((p) =>
           p?.data && typeof p.data === "string"
             ? {
-                filename: p.filename,
-                mimetype: p.mimetype || "application/octet-stream",
-                data: Buffer.from(p.data, "base64"),
-              }
+              filename: p.filename,
+              mimetype: p.mimetype || "application/octet-stream",
+              data: Buffer.from(p.data, "base64"),
+            }
             : p
         );
       }
@@ -309,10 +309,10 @@ Adresse : ${full.user?.adresse || "-"}`;
 
         // ======= EMAIL HTML (même style bandeau haut/carte/bandeau bas) =======
         const BRAND_PRIMARY = "#002147"; // titres/liens
-        const BAND_DARK     = "#0B2239"; // bandes bleu marine
-        const BAND_TEXT     = "#FFFFFF"; // texte bandes
-        const PAGE_BG       = "#F5F7FB"; // fond page
-        const CONTAINER_W   = 680;       // largeur conteneur
+        const BAND_DARK = "#0B2239"; // bandes bleu marine
+        const BAND_TEXT = "#FFFFFF"; // texte bandes
+        const PAGE_BG = "#F5F7FB"; // fond page
+        const CONTAINER_W = 680;       // largeur conteneur
 
         const htmlBody = `<!doctype html>
 <html>
@@ -429,7 +429,7 @@ Adresse : ${full.user?.adresse || "-"}`;
 /** [ADMIN] Liste des réclamations (paginée, filtrée) */
 export async function adminListReclamations(req, res) {
   try {
-    const page     = Math.max(parseInt(req.query.page || "1", 10), 1);
+    const page = Math.max(parseInt(req.query.page || "1", 10), 1);
     const pageSize = Math.min(Math.max(parseInt(req.query.pageSize || "10", 10), 1), 100);
 
     const q = (req.query.q || "").trim();
@@ -468,9 +468,9 @@ export async function adminListReclamations(req, res) {
     const filtered = !q
       ? docs
       : docs.filter((r) => {
-          const clientStr = `${r?.user?.prenom || ""} ${r?.user?.nom || ""} ${r?.user?.email || ""}`.toLowerCase();
-          return clientStr.includes(q.toLowerCase()) || true; // we already matched other fields in DB
-        });
+        const clientStr = `${r?.user?.prenom || ""} ${r?.user?.nom || ""} ${r?.user?.email || ""}`.toLowerCase();
+        return clientStr.includes(q.toLowerCase()) || true; // we already matched other fields in DB
+      });
 
     // Map to the exact shape your frontend expects
     const items = filtered.map((r) => {
@@ -501,20 +501,32 @@ export async function adminListReclamations(req, res) {
 export const streamReclamationPdf = async (req, res) => {
   try {
     const { id } = req.params;
-    const r = await Reclamation.findById(id).select("demandePdf pdf").lean();
+
+    // ⚠️ on récupère AUSSI la référence (numero)
+    const r = await Reclamation.findById(id)
+      .select("numero demandePdf pdf")
+      .lean();
 
     const bin = r?.demandePdf?.data || r?.pdf?.data;
     const type = r?.demandePdf?.contentType || r?.pdf?.contentType || "application/pdf";
     if (!bin) return res.status(404).json({ success: false, message: "PDF introuvable" });
 
+    // ✅ nom de fichier = référence, ex: R2500008.pdf
+    const fileName = `${r?.numero || id}.pdf`;
+
     res.setHeader("Content-Type", type);
-    res.setHeader("Content-Disposition", `inline; filename="reclamation-${id}.pdf"`);
+
+    // 'inline' = affichage dans l'onglet PDF ; le bouton "télécharger" proposera fileName
+    // Si tu veux forcer le téléchargement direct: remplace "inline" par "attachment"
+    res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
+
     return res.send(Buffer.from(bin.buffer || bin));
   } catch (e) {
     console.error("streamReclamationPdf:", e);
     res.status(500).json({ success: false, message: "Erreur serveur" });
   }
 };
+
 
 export const streamReclamationDocument = async (req, res) => {
   try {
