@@ -318,17 +318,7 @@ export function buildDevisGrillePDF(devis = {}) {
     }
   }
 
-  /* ===== Footer ===== */
-  if (y + 48 > BOTTOM) { doc.addPage(); y = TOP; }
-  rule(BOTTOM - 54);
-  doc
-    .font("Helvetica")
-    .fontSize(8)
-    .fillColor("#666")
-    .text("Document généré automatiquement — MTR Industry", LEFT, BOTTOM - 46, {
-      width: INNER_W,
-      align: "center",
-    });
+
 
   doc.end();
   return new Promise((resolve) => doc.on("end", () => resolve(Buffer.concat(chunks))));

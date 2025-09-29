@@ -12,7 +12,7 @@ export async function buildReclamationPDF(rec) {
       doc.on("end", () => resolve(Buffer.concat(chunks)));
 
       /* --------- Styles & constantes --------- */
-      const NAVY   = "#002147";   // bleu marine MTR
+      const NAVY   = "#002147";
       const LIGHT  = "#F3F3F8";
       const BORDER = "#C8C8D8";
 
@@ -20,12 +20,13 @@ export async function buildReclamationPDF(rec) {
       const TABLE_W    = 515;
       const PAGE_RIGHT = PAGE_LEFT + TABLE_W;
 
-      // --- Réglages d'alignement visuel
-      const LOGO_W = 120;       // largeur cible du logo
-      const LOGO_H = 60;        // hauteur visuelle approx. du logo
-      const TOP_Y  = 0;         // colle un peu plus en haut
-      const TITLE_SIZE = 30;    // taille du titre
-      const TITLE_Y = TOP_Y + 18; // position du titre (bandeau commun logo+titre)
+      // >>> Réglages visuels demandés
+      const LOGO_W = 180;       // 🔵 logo PLUS GRAND
+      const LOGO_H = 80;
+      const TOP_Y  = 0;
+
+      const TITLE_SIZE = 26;    // 🔵 titre un peu PLUS PETIT
+      const TITLE_Y = TOP_Y + 20;
 
       const safe = (s = "") => String(s ?? "").trim() || "—";
       const dateStr = dayjs(rec?.createdAt || Date.now()).format("DD/MM/YYYY HH:mm:ss");
@@ -56,25 +57,24 @@ export async function buildReclamationPDF(rec) {
 
       /* ======================= ENTÊTE ======================= */
 
-      // 1) Logo — on positionne pour qu'il tombe sur la même "ligne" visuelle que le titre
-      //    (centre vertical du logo ≈ centre de la ligne du titre)
+      // 1) Logo — aligné sur la même "ligne" que le titre
       try {
         const logoPath = path.resolve(process.cwd(), "assets/logo.png");
-        const logoY = TITLE_Y - (LOGO_H - TITLE_SIZE) / 2 - 2; // petit offset pour l’œil
+        const logoY = TITLE_Y - (LOGO_H - TITLE_SIZE) / 2 - 2; // centrage visuel
         doc.image(logoPath, PAGE_LEFT, logoY, {
-          width: LOGO_W, height: LOGO_H, fit: [LOGO_W, LOGO_H]
+          width: LOGO_W, height: LOGO_H, fit: [LOGO_W, LOGO_H],
         });
       } catch {}
 
-      // 2) Titre centré
+      // 2) Titre (centré)
       doc
         .font("Helvetica-Bold")
         .fontSize(TITLE_SIZE)
         .fillColor(NAVY)
         .text("Réclamation", 0, TITLE_Y, { width: doc.page.width, align: "center" });
 
-      // 3) Réf / Date — on les DESCEND nettement sous le titre
-      const metaY = TITLE_Y + 28; // ↓ plus bas
+      // 3) Réf / Date — plus BAS
+      const metaY = TITLE_Y + 34; // ↓ descendre encore si besoin
       const refLabel = "Réf : ";
       const refValue = safe(rec?.numero);
 
@@ -96,21 +96,20 @@ export async function buildReclamationPDF(rec) {
       doc.font("Helvetica-Bold").fontSize(10);
       const dateValueW = doc.widthOfString(dateValue);
 
-      const dateY = metaY + 20; // ↓ encore un cran
+      const dateY = metaY + 22; // ↓
       const xDateValue = PAGE_RIGHT - dateValueW;
       const xDateLabel = xDateValue - dateLabelW;
 
       doc.font("Helvetica").fontSize(10).text(dateLabel, xDateLabel, dateY);
       doc.font("Helvetica-Bold").fontSize(10).text(dateValue, xDateValue, dateY);
 
-      // ligne de séparation sous le bloc header
-      const headerRuleY = dateY + 22;
+      // ligne de séparation
+      const headerRuleY = dateY + 24;
       doc.moveTo(PAGE_LEFT, headerRuleY).lineTo(PAGE_RIGHT, headerRuleY)
          .strokeColor(BORDER).lineWidth(1).stroke();
 
       /* ======================= CLIENT (descendu) ======================= */
-
-      const blockTop = headerRuleY + 18; // ↓ encore de l’air avant "Client"
+      const blockTop = headerRuleY + 24; // ↓ espace avant "Client"
       let nextY = drawSectionTitle("Client", PAGE_LEFT, blockTop, TABLE_W);
 
       const CLIENT_H = 120;
@@ -130,7 +129,7 @@ export async function buildReclamationPDF(rec) {
       );
 
       /* ======================= COMMANDE ======================= */
-      const CARD_SPACE_Y = 26; // espace un peu plus large entre cartes
+      const CARD_SPACE_Y = 26;
       const CMD_H = 140;
 
       nextY = clientRectY + CLIENT_H + CARD_SPACE_Y;

@@ -290,13 +290,6 @@ export function buildDevisCompressionPDF(devis = {}) {
     }
   }
 
-  /* ===== Pied ===== */
-  ensureSpace(40);
-  rule(BOTTOM - 56);
-  doc.font("Helvetica").fontSize(8).fillColor("#666")
-     .text("Document généré automatiquement — MTR Industry", LEFT, BOTTOM - 48, {
-       width: INNER_W, align: "center",
-     });
 
   doc.end();
   return new Promise((resolve) => doc.on("end", () => resolve(Buffer.concat(chunks))));
