@@ -113,7 +113,7 @@ export async function buildDevisPDF(devis, outDir = "storage/devis") {
   doc.font("Helvetica").text(dayjs(devis.createdAt).format("DD/MM/YYYY"), leftBox.x + lPad + 25, ly);
   ly += lh;
 
-  // N° DDV (unique, fusionné)
+  // N° DDV (unique, fusionné) — multi-ligne pour utiliser toute la largeur
   const ddvSet = new Set([
     devis?.demandeNumero,
     devis?.meta?.demandeNumero,
@@ -121,13 +121,17 @@ export async function buildDevisPDF(devis, outDir = "storage/devis") {
     ...(Array.isArray(devis?.items) ? devis.items.map(it => it?.demandeNumero) : []),
   ].filter(Boolean));
   const ddvList = Array.from(ddvSet).join(", ");
+
   doc.font("Helvetica-Bold").text("N° DDV : ", leftBox.x + lPad, ly);
-  doc.font("Helvetica").text(ddvList, leftBox.x + lPad + 55, ly);
+  const ddvLabelWidth = doc.widthOfString("N° DDV : ");
+  doc.font("Helvetica").text(
+    ddvList,
+    leftBox.x + lPad + ddvLabelWidth + 2,
+    ly,
+    { width: leftBox.w - (lPad + ddvLabelWidth) - 6 }
+  );
   ly += lh;
 
-  // PAGE
-  doc.font("Helvetica-Bold").text("PAGE", leftBox.x + lPad, ly);
-  doc.font("Helvetica").text("1 / 1", leftBox.x + lPad + 35, ly);
 
   // droite
   doc.rect(rightBox.x, rightBox.y, rightBox.w, rightBox.h).stroke();
@@ -369,9 +373,9 @@ export async function buildDevisPDF(devis, outDir = "storage/devis") {
     .text("Adresse :  ZI  EL  ONS Route de Tunis KM 10 Sakiet Ezzit BP 237 Sfax - Tunisie", M, footY)
     .text("Code TVA : 1327477/EAM 000", M, footY + 14)
     .text("E-mail : mtrsfax@gmail.com", M, footY + 28)
-    .text("GSM : 98 333 883 / 98 331 896", M, footY + 42)
+    .text("GSM : 98 333 883 / 98 331 896", M, footY + 42);
   doc.text("TEL : (216)74 850 999 / 74 863 888", M + 300, footY + 14)
-    .text("FAX : (216)74 864 863", M + 300, footY + 28)
+    .text("FAX : (216)74 864 863", M + 300, footY + 28);
 
   try {
     const qrPath = path.resolve("assets/Code_QR_fb.png");
@@ -379,7 +383,7 @@ export async function buildDevisPDF(devis, outDir = "storage/devis") {
     if (fs.existsSync(qrPath)) {
       doc.image(qrPath, W - M - qrSize, footY - 6, { width: qrSize, height: qrSize, fit: [qrSize, qrSize] });
     }
-  } catch { }
+  } catch {}
 
   /* ===== FIN ===== */
   doc.end();
