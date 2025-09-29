@@ -68,7 +68,7 @@ export async function buildReclamationPDF(rec) {
       doc.font("Helvetica-Bold")
         .fontSize(22)
         .fillColor(NAVY)
-        .text("Réclamation client", 0, topY + 35, { align: "center" });
+        .text("Réclamation ", 0, topY + 35, { align: "center" });
 
       // Bloc Réf / Date (placé juste au-dessus de "Client")
       const metaY = topY + LOGO_W + 10;
