@@ -21,7 +21,7 @@ export async function buildReclamationPDF(rec) {
       const PAGE_RIGHT = PAGE_LEFT + TABLE_W;
 
       const LOGO_W = 120; // taille logo
-      const TOP_Y  = 10;  // point de départ haut
+      const TOP_Y  = 4;   // 🔼 logo un peu plus haut (avant: 10)
 
       const safe = (s = "") => String(s ?? "").trim() || "—";
       const dateStr = dayjs(rec?.createdAt || Date.now()).format("DD/MM/YYYY HH:mm:ss");
@@ -52,26 +52,24 @@ export async function buildReclamationPDF(rec) {
 
       /* ======================= HEADER ======================= */
 
-      // 1) Logo (inchangé, collé en haut)
+      // 1) Logo (un peu plus haut)
       try {
         const logoPath = path.resolve(process.cwd(), "assets/logo.png");
         doc.image(logoPath, PAGE_LEFT, TOP_Y, {
           width: LOGO_W, height: LOGO_W, fit: [LOGO_W, LOGO_W],
         });
-      } catch {
-        /* pas de logo = on ignore */
-      }
+      } catch {}
 
-      // 2) Titre centré (un peu plus haut qu'avant)
-      const titleY = TOP_Y + 28; // remonte le titre
+      // 2) Titre centré
+      const titleY = TOP_Y + 26; // équilibré avec logo
       doc
         .font("Helvetica-Bold")
         .fontSize(26)
         .fillColor(NAVY)
         .text("Réclamation", 0, titleY, { width: doc.page.width, align: "center" });
 
-      // 3) Réf / Date – remontés : alignés à droite SOUS le titre
-      const metaY = titleY + 6; // proche du titre
+      // 3) Réf / Date — un peu plus bas que précédemment
+      const metaY = titleY + 14; // 🔽 avant: +6
       const refLabel = "Réf : ";
       const refValue = safe(rec?.numero);
 
@@ -80,13 +78,11 @@ export async function buildReclamationPDF(rec) {
       doc.font("Helvetica-Bold").fontSize(10);
       const refValueW = doc.widthOfString(refValue);
 
-      // ligne "Réf"
-      let xRefValue = PAGE_RIGHT - refValueW;
-      let xRefLabel = xRefValue - refLabelW;
+      const xRefValue = PAGE_RIGHT - refValueW;
+      const xRefLabel = xRefValue - refLabelW;
       doc.font("Helvetica").fontSize(10).fillColor("#000").text(refLabel, xRefLabel, metaY);
       doc.font("Helvetica-Bold").fontSize(10).text(refValue, xRefValue, metaY);
 
-      // ligne "Date"
       const dateLabel = "Date : ";
       const dateValue = dateStr;
 
@@ -95,24 +91,24 @@ export async function buildReclamationPDF(rec) {
       doc.font("Helvetica-Bold").fontSize(10);
       const dateValueW = doc.widthOfString(dateValue);
 
-      const dateY = metaY + 16;
+      const dateY = metaY + 18; // 🔽 avant: +16
       const xDateValue = PAGE_RIGHT - dateValueW;
       const xDateLabel = xDateValue - dateLabelW;
 
       doc.font("Helvetica").fontSize(10).text(dateLabel, xDateLabel, dateY);
       doc.font("Helvetica-Bold").fontSize(10).text(dateValue, xDateValue, dateY);
 
-      // petite règle pour fermer l'entête
+      // ligne de séparation
       doc
-        .moveTo(PAGE_LEFT, dateY + 20)
-        .lineTo(PAGE_RIGHT, dateY + 20)
+        .moveTo(PAGE_LEFT, dateY + 22) // 🔽 un peu plus d’air
+        .lineTo(PAGE_RIGHT, dateY + 22)
         .strokeColor(BORDER)
         .lineWidth(1)
         .stroke();
 
-      /* ======================= BLOC CLIENT (remonté) ======================= */
+      /* ======================= BLOC CLIENT (descendu un peu) ======================= */
 
-      const blockTop = dateY + 28; // plus haut qu'avant
+      const blockTop = dateY + 36; // 🔽 avant: +28
       let nextY = drawSectionTitle("Client", PAGE_LEFT, blockTop, TABLE_W);
 
       const CLIENT_H = 120;
@@ -132,7 +128,7 @@ export async function buildReclamationPDF(rec) {
       );
 
       /* ======================= BLOC COMMANDE ======================= */
-      const CARD_SPACE_Y = 22; // espace réduit
+      const CARD_SPACE_Y = 24; // un peu plus d’espace
       const CMD_H = 140;
 
       nextY = clientRectY + CLIENT_H + CARD_SPACE_Y;
