@@ -21,8 +21,8 @@ export async function buildReclamationPDF(rec) {
       const PAGE_RIGHT = PAGE_LEFT + TABLE_W;
 
       // >>> Réglages visuels demandés
-      const LOGO_W = 180;       // 🔵 logo PLUS GRAND
-      const LOGO_H = 80;
+      const LOGO_W = 300;       // 🔵 logo PLUS GRAND
+      const LOGO_H = 150;
       const TOP_Y  = 0;
 
       const TITLE_SIZE = 26;    // 🔵 titre un peu PLUS PETIT
