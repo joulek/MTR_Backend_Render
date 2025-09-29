@@ -69,7 +69,7 @@ export async function buildReclamationPDF(rec) {
         .text("Réclamation", 0, titleY, { width: doc.page.width, align: "center" });
 
       // 3) Réf / Date — un peu plus bas que précédemment
-      const metaY = titleY + 14; // 🔽 avant: +6
+      const metaY = titleY + 16; // 🔽 avant: +6
       const refLabel = "Réf : ";
       const refValue = safe(rec?.numero);
 
@@ -91,7 +91,7 @@ export async function buildReclamationPDF(rec) {
       doc.font("Helvetica-Bold").fontSize(10);
       const dateValueW = doc.widthOfString(dateValue);
 
-      const dateY = metaY + 18; // 🔽 avant: +16
+      const dateY = metaY + 20; // 🔽 avant: +16
       const xDateValue = PAGE_RIGHT - dateValueW;
       const xDateLabel = xDateValue - dateLabelW;
 
@@ -108,7 +108,7 @@ export async function buildReclamationPDF(rec) {
 
       /* ======================= BLOC CLIENT (descendu un peu) ======================= */
 
-      const blockTop = dateY + 36; // 🔽 avant: +28
+      const blockTop = dateY + 39; // 🔽 avant: +28
       let nextY = drawSectionTitle("Client", PAGE_LEFT, blockTop, TABLE_W);
 
       const CLIENT_H = 120;
