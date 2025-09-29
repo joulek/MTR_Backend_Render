@@ -12,12 +12,12 @@ export async function buildReclamationPDF(rec) {
       doc.on("end", () => resolve(Buffer.concat(chunks)));
 
       /* --------- Constantes --------- */
-      const NAVY  = "#003366",
-            LIGHT = "#F3F3F8",
+      const NAVY   = "#003366",
+            LIGHT  = "#F3F3F8",
             BORDER = "#C8C8D8";
 
-      const PAGE_LEFT = 40;
-      const TABLE_W   = 515;
+      const PAGE_LEFT  = 40;
+      const TABLE_W    = 515;
       const PAGE_RIGHT = PAGE_LEFT + TABLE_W;
       const CARD_SPACE_Y = 28;
       const LOGO_W = 120; // taille logo
@@ -50,7 +50,7 @@ export async function buildReclamationPDF(rec) {
       };
 
       /* ======================= HEADER ======================= */
-      const topY = 25; // logo plus haut
+      const topY = 10; // logo plus haut
 
       // Logo
       try {
@@ -60,15 +60,17 @@ export async function buildReclamationPDF(rec) {
           height: LOGO_W,
           fit: [LOGO_W, LOGO_W],
         });
-      } catch {}
+      } catch {
+        /* si le logo manque, on ignore pour ne pas casser le rendu */
+      }
 
-      // Titre centré (descendu un peu)
+      // Titre centré (légèrement descendu)
       doc.font("Helvetica-Bold")
         .fontSize(22)
         .fillColor(NAVY)
-        .text("Réclamation client", 0, topY + 30, { align: "center" });
+        .text("Réclamation client", 0, topY + 35, { align: "center" });
 
-      // Bloc Réf / Date (descendu au-dessus du bloc Client)
+      // Bloc Réf / Date (placé juste au-dessus de "Client")
       const metaY = topY + LOGO_W + 10;
 
       const refLabel = "Réf : ";
@@ -93,7 +95,7 @@ export async function buildReclamationPDF(rec) {
       doc.font("Helvetica-Bold").fontSize(10).text(dateValue, dateValueX, dateY);
 
       /* ======================= BLOC CLIENT ======================= */
-      const blockTop = metaY + 40; // bloc client plus bas
+      const blockTop = metaY + 40; // bloc Client un peu plus bas
 
       const CLIENT_H = 120;
       let nextY = drawSectionTitle("Client", PAGE_LEFT, blockTop, TABLE_W);
