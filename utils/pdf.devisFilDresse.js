@@ -90,7 +90,7 @@ export function buildDevisFilDressePDF(devis = {}) {
 
 
   /* ===== En-tête (avec logo) ===== */
-  const logoPath = tryImage(["assets/logo_MTR.png"]);
+  const logoPath = tryImage(["assets/logo.png"]);
   if (logoPath) {
     // ↑ Agrandi : largeur max 180, hauteur max 85 (ratio conservé)
     doc.image(logoPath, LEFT, y - 6, { fit: [180, 85] });

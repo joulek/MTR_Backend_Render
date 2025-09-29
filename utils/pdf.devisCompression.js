@@ -98,7 +98,7 @@ export function buildDevisCompressionPDF(devis = {}) {
   };
 
   /* ===== En-tête ===== */
-  const logoPath = tryImage(["assets/logo_MTR.png"]);
+  const logoPath = tryImage(["assets/logo.png"]);
   // ↑ Agrandi : largeur max 180, hauteur max 85 (ratio conservé)
   const logoW = 180, logoHMax = 85;
   if (logoPath) doc.image(logoPath, LEFT, y - 8, { fit: [logoW, logoHMax] });

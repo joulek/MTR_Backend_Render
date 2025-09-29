@@ -62,7 +62,7 @@ export async function buildDevisPDF(devis, outDir = "storage/devis") {
   // Logo (agrandi)
   const logoW = 190;
   const logoHMax = 90;
-  const logoPath = path.resolve("assets/logo_MTR.png");
+  const logoPath = path.resolve("assets/logo.png");
   let logoH = 0;
   if (fs.existsSync(logoPath)) {
     doc.image(logoPath, xLogo, yLogo, { fit: [logoW, logoHMax] });

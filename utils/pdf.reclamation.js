@@ -11,59 +11,132 @@ export async function buildReclamationPDF(rec) {
       doc.on("data", (c) => chunks.push(c));
       doc.on("end", () => resolve(Buffer.concat(chunks)));
 
-      const NAVY="#003366", LIGHT="#F3F3F8", BORDER="#C8C8D8";
-      const PAGE_LEFT=40, TABLE_W=515, PAGE_RIGHT=PAGE_LEFT+TABLE_W;
-      const CARD_SPACE_Y=28;
+      /* --------- Constantes de mise en page --------- */
+      const NAVY = "#003366",
+        LIGHT = "#F3F3F8",
+        BORDER = "#C8C8D8";
 
-      const safe = (s="") => {
+      const PAGE_LEFT = 40;               // marge gauche (= doc.options.margin)
+      const TABLE_W = 515;                // largeur de zone utile
+      const PAGE_RIGHT = PAGE_LEFT + TABLE_W;
+      const CARD_SPACE_Y = 28;
+
+      /* --------- Helpers --------- */
+      const safe = (s = "") => {
         const v = String(s ?? "").trim();
         return v || "—";
       };
-      const dateStr = dayjs(rec?.createdAt || Date.now()).format("DD/MM/YYYY HH:mm:ss");
+      const dateStr = dayjs(rec?.createdAt || Date.now()).format(
+        "DD/MM/YYYY HH:mm:ss"
+      );
 
       const u = rec?.user || {};
       const c = rec?.commande || {};
 
       const drawSectionTitle = (label, x, y, w) => {
-        doc.save().fillColor(NAVY).rect(x,y,w,20).fill()
-           .fillColor("#FFF").font("Helvetica-Bold").fontSize(11)
-           .text(label, x+10, y+4, { width: w-20, align: "left" }).restore();
-        return y+20;
+        doc
+          .save()
+          .fillColor(NAVY)
+          .rect(x, y, w, 20)
+          .fill()
+          .fillColor("#FFF")
+          .font("Helvetica-Bold")
+          .fontSize(11)
+          .text(label, x + 10, y + 4, { width: w - 20, align: "left" })
+          .restore();
+        return y + 20;
       };
 
-      const drawKeyValue = (pairs, x, y, w, lineH=18, labelW=95) => {
+      const drawKeyValue = (
+        pairs,
+        x,
+        y,
+        w,
+        lineH = 18,
+        labelW = 95
+      ) => {
         doc.fontSize(10).fillColor("#000");
         pairs.forEach(([label, value]) => {
-          doc.font("Helvetica-Bold").text(label, x, y, { width: labelW, align: "left" });
-          doc.font("Helvetica").text(value, x+labelW, y, { width: w-labelW, align: "left" });
+          doc
+            .font("Helvetica-Bold")
+            .text(label, x, y, { width: labelW, align: "left" });
+          doc
+            .font("Helvetica")
+            .text(value, x + labelW, y, { width: w - labelW, align: "left" });
           y += lineH;
         });
         return y;
       };
 
+      /* ======================= HEADER ======================= */
       const topY = PAGE_LEFT;
 
+      // Logo
       try {
-        const logoPath = path.resolve(process.cwd(), "assets/logo_MTR.png");
-        doc.image(logoPath, PAGE_LEFT, topY - 10, { width: 90, height: 90, fit: [90,90] });
-      } catch {}
+        const logoPath = path.resolve(process.cwd(), "assets/logo.png");
+        doc.image(logoPath, PAGE_LEFT, topY - 10, {
+          width: 90,
+          height: 90,
+          fit: [90, 90],
+        });
+      } catch {
+        /* ignore si logo manquant */
+      }
 
-      doc.font("Helvetica-Bold").fontSize(18).fillColor("#000")
+      // Titre (centré)
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(18)
+        .fillColor("#000")
         .text("Réclamation client", 0, topY + 6, { align: "center" });
 
-      const metaX = PAGE_RIGHT - 220, metaY = topY + 42;
-      doc.font("Helvetica").fontSize(10).fillColor("#000")
-        .text("Réf :", metaX, metaY)
-        .font("Helvetica-Bold").text(safe(rec?.numero), metaX + 30, metaY)
-        .font("Helvetica").text("Date :", metaX, metaY + 16)
-        .font("Helvetica-Bold").text(dateStr, metaX + 30, metaY + 16);
+      // Métadonnées (Réf / Date) complètement à droite
+      const metaBoxX = PAGE_LEFT;
+      const metaBoxW = TABLE_W;
+      const metaY = topY + 42;
 
+      // Ligne: "Réf : <numero>" alignée à droite
+      doc
+        .font("Helvetica")
+        .fontSize(10)
+        .fillColor("#000")
+        .text("Réf : ", metaBoxX, metaY, {
+          width: metaBoxW,
+          align: "right",
+          continued: true, // reste sur la même ligne
+        })
+        .font("Helvetica-Bold")
+        .text(safe(rec?.numero), {
+          width: metaBoxW,
+          align: "right",
+        });
+
+      // Ligne: "Date : <dateStr>" alignée à droite
+      doc
+        .font("Helvetica")
+        .text("Date : ", metaBoxX, metaY + 16, {
+          width: metaBoxW,
+          align: "right",
+          continued: true,
+        })
+        .font("Helvetica-Bold")
+        .text(dateStr, {
+          width: metaBoxW,
+          align: "right",
+        });
+
+      /* ======================= BLOC CLIENT ======================= */
       const blockTop = topY + 90;
 
       const CLIENT_H = 120;
       let nextY = drawSectionTitle("Client", PAGE_LEFT, blockTop, TABLE_W);
       const clientRectY = nextY;
-      doc.rect(PAGE_LEFT, clientRectY, TABLE_W, CLIENT_H).strokeColor(BORDER).stroke();
+
+      doc
+        .rect(PAGE_LEFT, clientRectY, TABLE_W, CLIENT_H)
+        .strokeColor(BORDER)
+        .stroke();
+
       drawKeyValue(
         [
           ["Nom", `${safe(u.prenom)} ${safe(u.nom)}`.trim()],
@@ -76,43 +149,59 @@ export async function buildReclamationPDF(rec) {
         TABLE_W - 20
       );
 
+      /* ======================= BLOC COMMANDE ======================= */
       const CMD_H = 140;
       nextY = clientRectY + CLIENT_H + CARD_SPACE_Y;
 
-      const cmdTitleBottom = drawSectionTitle("Commande", PAGE_LEFT, nextY, TABLE_W);
+      const cmdTitleBottom = drawSectionTitle(
+        "Commande",
+        PAGE_LEFT,
+        nextY,
+        TABLE_W
+      );
       const cmdRectY = cmdTitleBottom;
-      doc.rect(PAGE_LEFT, cmdRectY, TABLE_W, CMD_H).strokeColor(BORDER).stroke();
+
+      doc
+        .rect(PAGE_LEFT, cmdRectY, TABLE_W, CMD_H)
+        .strokeColor(BORDER)
+        .stroke();
+
       drawKeyValue(
         [
-          ["Type doc",  safe(c.typeDoc)],
-          ["Numéro",    safe(c.numero)],
-          ["Date livr.", c.dateLivraison ? dayjs(c.dateLivraison).format("DD/MM/YYYY") : "—"],
+          ["Type doc", safe(c.typeDoc)],
+          ["Numéro", safe(c.numero)],
+          [
+            "Date livr.",
+            c.dateLivraison ? dayjs(c.dateLivraison).format("DD/MM/YYYY") : "—",
+          ],
           ["Réf prod.", safe(c.referenceProduit)],
-          ["Quantité",  String(c.quantite ?? "—")],
+          ["Quantité", String(c.quantite ?? "—")],
         ],
         PAGE_LEFT + 10,
         cmdRectY + 8,
         TABLE_W - 20
       );
 
+      /* ======================= BLOC RÉCLAMATION ======================= */
       const afterBlocksY = cmdRectY + CMD_H + CARD_SPACE_Y;
 
-      // ————— Réclamation —————
       let ry = drawSectionTitle("Réclamation", PAGE_LEFT, afterBlocksY, TABLE_W);
       doc.save().rect(PAGE_LEFT, ry, TABLE_W, 56).fill(LIGHT).restore();
       doc.rect(PAGE_LEFT, ry, TABLE_W, 56).strokeColor(BORDER).stroke();
+
       ry = drawKeyValue(
         [
-          ["Nature",  safe(rec?.nature)],   // ← directement el champ
-          ["Attente", safe(rec?.attente)],  // ← directement el champ
+          ["Nature", safe(rec?.nature)],
+          ["Attente", safe(rec?.attente)],
         ],
         PAGE_LEFT + 10,
         ry + 8,
         TABLE_W - 20
       );
 
-      // ma fama ch "Description" section taw
+      // (Pas de champ Description pour le moment)
 
+      /* ======================= FIN ======================= */
       doc.end();
     } catch (e) {
       reject(e);
