@@ -414,7 +414,6 @@ export const createFromDemande = async (req, res) => {
     const numeroById = new Map(loaded.map((f) => [String(f.doc._id), f.doc.numero]));
 
     /* -------------------- 3) Construire les lignes -------------------- */
-    // On charge les articles en parallèle pour éviter N requêtes en série
     const articleIds = [...new Set(lines.map((ln) => ln?.articleId).filter(Boolean))];
     const arts = await Article.find({ _id: { $in: articleIds } });
     const artsMap = new Map(arts.map((a) => [String(a._id), a]));
@@ -440,7 +439,12 @@ export const createFromDemande = async (req, res) => {
       if (!numFromLine) numFromLine = loaded[0].doc.numero || "";
 
       const qte = toNum(qty || 1);
-      const puht = toNum(art.prixHT ?? art.priceHT ?? 0);
+
+      // NEW: priorité au PU envoyé par le front; fallback = prix article
+      const puFront = toNum(ln?.puht);
+      const puArticle = toNum(art.prixHT ?? art.priceHT ?? 0);
+      const puht = puFront >= 0 ? puFront : puArticle;
+
       const remise = toNum(remisePct || 0);
       const tva = toNum(tvaPct || 0);
       const totalHT = +(qte * puht * (1 - remise / 100)).toFixed(3);
@@ -491,27 +495,23 @@ export const createFromDemande = async (req, res) => {
       meta: {
         demandes: loaded.map((x) => ({ id: x.doc._id, numero: x.doc.numero, type: x.type })),
       },
-      // on pourra ajouter plus tard: pdfUrl, emailStatus, etc.
     });
 
-    /* -------------------- 7) Répondre tout de suite -------------------- */
-    // On répond sans attendre le PDF ni l’e-mail
+    /* -------------------- 7) Réponse immédiate -------------------- */
     res.status(201).json({
       success: true,
       devis: { _id: devis._id, numero: devis.numero },
-      pdf: null,                 // sera rempli plus tard
+      pdf: null,
       email: { queued: !!(sendEmail && devis.client?.email) },
     });
 
-    /* -------------------- 8) Tâches asynchrones non-bloquantes -------------------- */
-    // Lancer en arrière-plan après la réponse
+    /* -------------------- 8) PDF + Email en arrière-plan -------------------- */
     setImmediate(async () => {
       try {
-        // 8.a) PDF robuste + fallback
+        // PDF
         let pdfUrl = null;
         try {
           const { filename } = await buildDevisPDF(devis);
-          // Assure-toi que /files/devis/* est servi en statique par ton serveur
           pdfUrl = `${ORIGIN}/files/devis/${filename}`;
         } catch (err) {
           const seg = SEG_FOR_TYPE(loaded[0].type);
@@ -519,10 +519,9 @@ export const createFromDemande = async (req, res) => {
           console.error("buildDevisPDF failed, using fallback:", err?.message || err);
         }
 
-        // 8.b) Sauvegarder l’URL PDF sur le devis
         await Devis.findByIdAndUpdate(devis._id, { $set: { pdfUrl } }).catch(() => {});
-        
-        // 8.c) Envoi d’e-mail (optionnel)
+
+        // Email
         if (sendEmail && devis.client?.email) {
           try {
             const transport = makeTransport();
@@ -531,7 +530,7 @@ export const createFromDemande = async (req, res) => {
               compression: "compression",
               traction: "traction",
               torsion: "torsion",
-              fil: "fil", // adapte si ton route réel est "fildresse"
+              fil: "fil",
               grille: "grille",
             };
             const demandesLinks = loaded.map((x) => {
@@ -552,7 +551,7 @@ export const createFromDemande = async (req, res) => {
               subject,
               text: textBody,
             });
-            // Optionnel: marquer email comme envoyé
+
             await Devis.findByIdAndUpdate(devis._id, { $set: { emailSentAt: new Date() } }).catch(() => {});
           } catch (err) {
             console.error("sendMail failed:", err);
@@ -565,7 +564,6 @@ export const createFromDemande = async (req, res) => {
         console.error("Background job (PDF/Mail) error:", bgErr);
       }
     });
-
   } catch (e) {
     console.error("createFromDemande:", e);
     if (!res.headersSent) {
@@ -573,5 +571,6 @@ export const createFromDemande = async (req, res) => {
     }
   }
 };
+
 
 
