@@ -6,8 +6,7 @@ import path from "path";
 
 /**
  * PDF "Ressorts de Compression"
- * Ordre: En-tête → Client → Schéma (2 images côte à côte) → Spécifications principales
- *        → [Exigences + Remarques regroupées s'ils existent]
+ * Ordre: En-tête → Client → Schéma → Spécifications → [Exigences + Remarques]
  */
 export function buildDevisCompressionPDF(devis = {}) {
   const doc = new PDFDocument({ size: "A4", margin: 40 });
@@ -16,7 +15,7 @@ export function buildDevisCompressionPDF(devis = {}) {
   doc.on("data", (c) => chunks.push(c));
 
   /* ===== Styles & helpers ===== */
-  const PRIMARY = "#002147"; // ✅ bleu marine MTR
+  const PRIMARY = "#002147";
   const LIGHT   = "#F5F7FB";
   const BORDER  = "#D5D9E4";
   const TXT     = "#111";
@@ -52,7 +51,6 @@ export function buildDevisCompressionPDF(devis = {}) {
     return null;
   };
 
-  // Libellé mono-ligne (police auto-réduite)
   const fitOneLine = ({ text, x, y, width, bold = false, maxSize = 10, minSize = 8 }) => {
     const fontName = bold ? "Helvetica-Bold" : "Helvetica";
     let size = maxSize;
@@ -95,33 +93,35 @@ export function buildDevisCompressionPDF(devis = {}) {
     }
   };
 
-  /* ===== En-tête ===== */
+  /* ===== En-tête (alignement logo ↔ titre) ===== */
   const logoPath = tryImage(["assets/logo.png"]);
+  const HEADER_Y = TOP - 2;       // ligne de référence pour les éléments du bandeau
 
-  // ✅ Logo plus grand
+  // Logo (même taille, mais plus haut : sur la même ligne que le titre)
   const logoW = 230, logoHMax = 110;
-  if (logoPath) doc.image(logoPath, LEFT, y - 10, { fit: [logoW, logoHMax] });
+  const logoY = HEADER_Y - 12;    // remonte le logo pour l’aligner visuellement au titre
+  if (logoPath) doc.image(logoPath, LEFT, logoY, { fit: [logoW, logoHMax] });
 
-  // ✅ Titre en bleu marine
-  const titleTop = y + 6;
+  // Titre principal centré, exactement sur HEADER_Y
+  const titleTop = HEADER_Y;
   doc
     .fillColor(PRIMARY)
     .font("Helvetica-Bold")
     .fontSize(20)
     .text("Demande de devis", LEFT, titleTop, { width: INNER_W, align: "center" });
 
+  // Sous-titre juste en dessous (espacement dynamique)
+  const h1 = doc.heightOfString("Demande de devis", { width: INNER_W });
+  const subTop = titleTop + h1 + 5;
   doc
     .font("Helvetica-Bold")
     .fontSize(22)
     .fillColor(PRIMARY)
-    .text("Ressorts de Compression", LEFT, titleTop + 25, { width: INNER_W, align: "center" });
+    .text("Ressorts de Compression", LEFT, subTop, { width: INNER_W, align: "center" });
 
-  // Méta à droite
-  const metaTop =
-    titleTop +
-    25 +
-    doc.heightOfString("Ressorts de Compression", { width: INNER_W }) +
-    6;
+  // Méta à droite (après le sous-titre)
+  const subH = doc.heightOfString("Ressorts de Compression", { width: INNER_W });
+  const metaTop = subTop + subH + 6;
 
   const numero = devis?.numero ? `N° : ${devis.numero}` : devis?._id ? `ID : ${devis._id}` : "";
   doc
@@ -198,8 +198,8 @@ export function buildDevisCompressionPDF(devis = {}) {
   y += clientBoxH + 14;
 
   /* ===== Schéma ===== */
-  const imgExtr = tryImage(["assets/compression02.png"]); // extrémités
-  const imgDim  = tryImage(["assets/compression01.png"]); // dimensions
+  const imgExtr = tryImage(["assets/compression02.png"]);
+  const imgDim  = tryImage(["assets/compression01.png"]);
   if (imgExtr || imgDim) {
     y = section("Schéma", y);
     const gap = 18;
@@ -289,7 +289,6 @@ export function buildDevisCompressionPDF(devis = {}) {
       y += b.h + 12;
     }
   }
-
 
   doc.end();
   return new Promise((resolve) => doc.on("end", () => resolve(Buffer.concat(chunks))));
