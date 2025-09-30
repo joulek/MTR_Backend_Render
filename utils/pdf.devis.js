@@ -56,7 +56,10 @@ export async function buildDevisPDF(devis, outDir = "storage/devis") {
 
   /* ===== ENTÊTE ===== */
   const yTopTitle = 28;  // ↓ descend le titre pour éviter la coupe
-  const xLogo = M;
+
+  // === déplacer le logo légèrement à droite ===
+  const LOGO_SHIFT = 60;         // ← زيد/نقص الرقم هذا كيف تحب (px)
+  const xLogo = M + LOGO_SHIFT;  // ← كان M قبل
   const yLogo = 6;
 
   // Logo (agrandi)
@@ -69,8 +72,9 @@ export async function buildDevisPDF(devis, outDir = "storage/devis") {
     logoH = logoHMax;
   }
 
-  const titleX = M + logoW + 18;
-  const titleW = innerW - logoW - 18;
+  // العنوان يعتمد الآن على xLogo باش ما يتداخلش مع اللوغو
+  const titleX = xLogo + logoW + 18;
+  const titleW = innerW - (xLogo - M) - logoW - 18;
 
   doc.font("Helvetica-Bold").fontSize(FONT.big)
     .text("FABRICATION TOUT ARTICLE", titleX, yTopTitle, { width: titleW, align: "left" })
@@ -113,7 +117,7 @@ export async function buildDevisPDF(devis, outDir = "storage/devis") {
   doc.font("Helvetica").text(dayjs(devis.createdAt).format("DD/MM/YYYY"), leftBox.x + lPad + 25, ly);
   ly += lh;
 
-  // N° DDV (unique, fusionné) — multi-ligne pour utiliser toute la largeur
+  // N° DDV (unique, fusionné)
   const ddvSet = new Set([
     devis?.demandeNumero,
     devis?.meta?.demandeNumero,
@@ -131,7 +135,6 @@ export async function buildDevisPDF(devis, outDir = "storage/devis") {
     { width: leftBox.w - (lPad + ddvLabelWidth) - 6 }
   );
   ly += lh;
-
 
   // droite
   doc.rect(rightBox.x, rightBox.y, rightBox.w, rightBox.h).stroke();
@@ -320,7 +323,7 @@ export async function buildDevisPDF(devis, outDir = "storage/devis") {
   yTva += tvaHeaderH;
 
   // Lignes BASE & MT
-  const totals2 = computeTotals(devis); // pour éviter de relire "totals" si muté
+  const totals2 = computeTotals(devis);
   const baseRow = [
     "BASE",
     totals2.mtnetht,
