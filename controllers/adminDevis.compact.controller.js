@@ -158,6 +158,7 @@ export async function listDevisCompact(req, res) {
 }
 
 
+
 export async function listDemandesCompact(req, res) {
   try {
     const page  = Math.max(1, parseInt(req.query.page ?? "1", 10));
@@ -166,11 +167,8 @@ export async function listDemandesCompact(req, res) {
     const type  = (req.query.type || "all").toString().toLowerCase();
     const qRaw  = (req.query.q || "").toString().trim();
 
-    // regex et éventuelle interprétation date
-    const rx = qRaw ? new RegExp(escRx(qRaw), "i") : null;
-    const dateRange = parseDateRange(qRaw);
+    const rx = qRaw ? new RegExp(qRaw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") : null;
 
-    // toutes les collections
     const bases = [
       { model: DemandeCompression, t: "compression" },
       { model: DemandeTraction,    t: "traction" },
@@ -179,115 +177,162 @@ export async function listDemandesCompact(req, res) {
       { model: DemandeGrille,      t: "grille" },
       { model: DemandeAutre,       t: "autre" },
     ];
+    const base = bases[0];
     const unions = bases.slice(1);
 
-    // pipeline par collection
-    const pipelineFor = (typeLiteral) => {
-      const stages = [
-        /* 1) ramener le user */
-        {
-          $lookup: {
-            from: "users",
-            localField: "user",
-            foreignField: "_id",
-            as: "__userArr",
-          }
-        },
-        { $addFields: { __user: { $ifNull: [ { $arrayElemAt: ["$__userArr", 0] }, null ] } } },
-      ];
-
-      /* 2) $match global (OR) après $lookup pour que __user.* existe */
-      if (rx || dateRange) {
-        const or = [];
-        if (rx) {
-          or.push(
+    const mkMatch = () => {
+      if (!rx) return [];
+      return [{
+        $match: {
+          $or: [
             { numero: rx },
             { devisNumero: rx },
             { "devis.numero": rx },
             { "client.nom": rx },
             { "client.prenom": rx },
+            // recherche via user (après lookup)
             { "__user.prenom": rx },
             { "__user.nom": rx },
             { "__user.firstName": rx },
             { "__user.lastName": rx },
             { "__user.email": rx },
-            // ✅ match sur le type (chaîne littérale de ce pipeline)
-            { $expr: { $regexMatch: { input: { $literal: typeLiteral }, regex: rx } } },
-          );
+          ]
         }
-        if (dateRange) {
-          const [start, end] = dateRange;
-          or.push({ createdAt: { $gte: start, $lte: end } }, { date: { $gte: start, $lte: end } });
-        }
-        stages.push({ $match: { $or: or } });
-      }
-
-      /* 3) normalisation */
-      stages.push(
-        {
-          $addFields: {
-            __keepId: "$_id",
-            __devisNumero: { $ifNull: ["$devisNumero", "$devis.numero"] },
-            __first: {
-              $ifNull: [
-                "$client.prenom",
-                { $ifNull: ["$client.firstName", { $ifNull: ["$prenom", { $ifNull: ["$firstName", { $ifNull: ["$__user.prenom", "$__user.firstName"] }] }] }] }
-              ]
-            },
-            __last: {
-              $ifNull: [
-                "$client.nom",
-                { $ifNull: ["$client.lastName", { $ifNull: ["$nom", { $ifNull: ["$lastName", { $ifNull: ["$__user.nom", "$__user.lastName"] }] }] }] }
-              ]
-            },
-            __email:  { $ifNull: ["$client.email",  { $ifNull: ["$email",  "$__user.email"  ] }] },
-            __numTel: { $ifNull: ["$client.numTel", { $ifNull: ["$numTel", "$__user.numTel"] }] },
-            __hasDemandePdf: { $ne: ["$demandePdf", null] },
-            __attachmentsCount: { $cond: [ { $isArray: "$documents" }, { $size: "$documents" }, 0 ] }
-          }
-        },
-
-        /* 4) projection compacte */
-        {
-          $project: {
-            _id: "$__keepId",
-            demandeNumero: "$numero",
-            type: { $literal: typeLiteral },
-            devisNumero: "$__devisNumero",
-            clientName: {
-              $trim: { input: { $concat: [ { $ifNull: ["$__first", ""] }, " ", { $ifNull: ["$__last", ""] } ] } }
-            },
-            client: { prenom: { $ifNull: ["$__first", ""] }, nom: { $ifNull: ["$__last", ""] }, email: { $ifNull: ["$__email", ""] }, numTel: { $ifNull: ["$__numTel", ""] } },
-            date: "$createdAt",
-            hasDemandePdf: "$__hasDemandePdf",
-            attachments: "$__attachmentsCount",
-          }
-        }
-      );
-
-      return stages;
+      }];
     };
 
-    const basePipeline = pipelineFor(bases[0].t);
+    // ---- Étapes communes par collection (inclut $lookup users) ----
+    const commonStages = (typeLiteral) => ([
+      // 1) ramener l’utilisateur si le doc contient `user: ObjectId`
+      {
+        $lookup: {
+          from: "users",
+          localField: "user",
+          foreignField: "_id",
+          as: "__userArr",
+        }
+      },
+      {
+        $addFields: {
+          __user: { $ifNull: [ { $arrayElemAt: ["$__userArr", 0] }, null ] }
+        }
+      },
+
+      // 2) normaliser champs
+      {
+        $addFields: {
+          __keepId: "$_id",
+          __devisNumero: { $ifNull: ["$devisNumero", "$devis.numero"] },
+
+          // ordre prioritaire: client.prenom -> client.firstName -> this.prenom -> user.prenom/firstName
+          __first: {
+            $ifNull: [
+              "$client.prenom",
+              { $ifNull: [
+                "$client.firstName",
+                { $ifNull: [
+                  "$prenom",
+                  { $ifNull: [
+                    "$firstName",
+                    { $ifNull: ["$__user.prenom", "$__user.firstName"] }
+                  ] }
+                ] }
+              ] }
+            ]
+          },
+          __last: {
+            $ifNull: [
+              "$client.nom",
+              { $ifNull: [
+                "$client.lastName",
+                { $ifNull: [
+                  "$nom",
+                  { $ifNull: ["$lastName", { $ifNull: ["$__user.nom", "$__user.lastName"] }] }
+                ] }
+              ] }
+            ]
+          },
+
+          __email:   { $ifNull: [ "$client.email",   { $ifNull: [ "$email",   "$__user.email"   ] } ] },
+          __numTel:  { $ifNull: [ "$client.numTel",  { $ifNull: [ "$numTel",  "$__user.numTel"  ] } ] },
+
+          __hasDemandePdf: { $ne: ["$demandePdf", null] },
+
+          // compter pièces jointes (pas besoin des binaires ici)
+          __attachmentsCount: {
+            $cond: [
+              { $isArray: "$documents" },
+              { $size: "$documents" },
+              0
+            ]
+          }
+        }
+      },
+
+      // 3) projection compacte pour la liste
+      {
+        $project: {
+          _id: "$__keepId",
+          demandeNumero: "$numero",
+          type: { $literal: typeLiteral },
+          devisNumero: "$__devisNumero",
+          clientName: {
+            $trim: { input: { $concat: [ { $ifNull: ["$__first", ""] }, " ", { $ifNull: ["$__last", ""] } ] } }
+          },
+          client: {
+            prenom:  { $ifNull: ["$__first",  ""] },
+            nom:     { $ifNull: ["$__last",   ""] },
+            email:   { $ifNull: ["$__email",  ""] },
+            numTel:  { $ifNull: ["$__numTel", ""] },
+          },
+          date: "$createdAt",
+          hasDemandePdf: "$__hasDemandePdf",
+          attachments: "$__attachmentsCount"
+        }
+      }
+    ]);
+
+    const basePipeline = [
+      ...mkMatch(),
+      ...commonStages(base.t),
+    ];
+
     const unionStages = unions.map(({ model, t }) => ({
-      $unionWith: { coll: model.collection.name, pipeline: pipelineFor(t) }
+      $unionWith: {
+        coll: model.collection.name,
+        pipeline: [
+          ...mkMatch(),
+          ...commonStages(t),
+        ]
+      }
     }));
 
     const finalPipeline = [
       ...basePipeline,
       ...unionStages,
-      ...(type !== "all" ? [{ $match: { type } }] : []), // filtre du select "Tous les types"
+      ...(type !== "all" ? [{ $match: { type } }] : []),
       { $sort: { date: -1 } },
-      { $facet: { meta: [{ $count: "total" }], items: [{ $skip: skip }, { $limit: limit }] } },
-      { $project: { total: { $ifNull: [{ $arrayElemAt: ["$meta.total", 0] }, 0] }, items: 1 } }
+      {
+        $facet: {
+          meta:  [{ $count: "total" }],
+          items: [{ $skip: skip }, { $limit: limit }],
+        }
+      },
+      {
+        $project: {
+          total: { $ifNull: [{ $arrayElemAt: ["$meta.total", 0] }, 0] },
+          items: 1
+        }
+      }
     ];
 
-    const [agg] = await bases[0].model.aggregate(finalPipeline).allowDiskUse(true);
+    const [agg] = await base.model.aggregate(finalPipeline).allowDiskUse(true);
     const rows = agg?.items || [];
 
     const items = rows.map((d) => {
       const ddvPdf   = d.hasDemandePdf ? `${ORIGIN}/api/devis/${d.type}/${d._id}/pdf` : null;
       const devisPdf = d.devisNumero ? `${ORIGIN}/files/devis/${d.devisNumero}.pdf` : null;
+
       return {
         _id: d._id,
         demandeNumero: d.demandeNumero,
@@ -299,6 +344,7 @@ export async function listDemandesCompact(req, res) {
         hasDemandePdf: !!d.hasDemandePdf,
         ddvPdf,
         devisPdf,
+        // juste le nombre (affichage “Fichiers joints”)
         attachments: Number.isFinite(d.attachments) ? d.attachments : 0,
       };
     });
