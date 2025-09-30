@@ -93,28 +93,31 @@ export function buildDevisCompressionPDF(devis = {}) {
     }
   };
 
-  /* ===== En-tête (لوغو + عنوان طالعين لفوووق) ===== */
+  /* ===== En-tête ===== */
   const logoPath = tryImage(["assets/logo.png"]);
 
-  // نطلّع ال-header كله لفوق ~28px مع هامش أمان 10px من فوق
+  // Position de base du bandeau
   const SAFE_TOP = 10;
-  const HEADER_SHIFT_UP = 28;                 // بدّلها إذا تحبّه يطلع/يهبط
+  const HEADER_SHIFT_UP = 28;             // si tu veux remonter/descendre tout le bandeau
   const HEADER_Y = Math.max(SAFE_TOP, TOP - HEADER_SHIFT_UP);
 
-  // Logo كبير وعلى نفس خط العنوان تقريبًا
+  // ⇩ Descendre le titre (indépendant du logo)
+  const TITLE_OFFSET_DOWN = 24;           // <— règle la descente du titre
+  const titleTop = HEADER_Y + TITLE_OFFSET_DOWN;
+
+  // ⇧ Monter le logo (indépendant du titre)
+  const LOGO_EXTRA_UP = 10;               // <— plus grand => logo plus haut
   const logoW = 230, logoHMax = 110;
-  const logoY = Math.max(SAFE_TOP - 2, HEADER_Y - 14); // يطلع شوية أكثر باش يبان في نفس السطر
+  const logoY = Math.max(SAFE_TOP - 2, HEADER_Y - 14 - LOGO_EXTRA_UP);
   if (logoPath) doc.image(logoPath, LEFT, logoY, { fit: [logoW, logoHMax] });
 
-  // Titre الرئيسي (على نفس خط HEADER_Y)
-  const titleTop = HEADER_Y;
+  // Titres centrés
   doc
     .fillColor(PRIMARY)
     .font("Helvetica-Bold")
     .fontSize(20)
     .text("Demande de devis", LEFT, titleTop, { width: INNER_W, align: "center" });
 
-  // Sous-titre تحتو مباشرة
   const h1 = doc.heightOfString("Demande de devis", { width: INNER_W });
   const subTop = titleTop + h1 + 4;
   doc
@@ -123,22 +126,35 @@ export function buildDevisCompressionPDF(devis = {}) {
     .fillColor(PRIMARY)
     .text("Ressorts de Compression", LEFT, subTop, { width: INNER_W, align: "center" });
 
-  // Méta على اليمين
+  // Meta à droite (N° et Date) — valeurs en GRAS uniquement
   const subH = doc.heightOfString("Ressorts de Compression", { width: INNER_W });
   const metaTop = subTop + subH + 6;
 
-  const numero = devis?.numero ? `N° : ${devis.numero}` : devis?._id ? `ID : ${devis._id}` : "";
-  doc
-    .font("Helvetica")
-    .fontSize(10)
-    .fillColor(TXT)
-    .text(numero, LEFT, metaTop, { width: INNER_W, align: "right" })
-    .text(
-      `Date : ${dayjs(devis?.createdAt || Date.now()).format("DD/MM/YYYY HH:mm")}`,
-      LEFT,
-      metaTop + 16,
-      { width: INNER_W, align: "right" }
-    );
+  const metaFontSize = 10;
+
+  // N°
+  const numLabel = "N° : ";
+  const numValue = devis?.numero ? String(devis.numero) : (devis?._id ? String(devis._id) : "");
+  doc.font("Helvetica-Bold").fontSize(metaFontSize);
+  const numValW = doc.widthOfString(numValue);
+  const numValX = RIGHT - numValW;
+  doc.text(numValue, numValX, metaTop, { lineBreak: false });
+
+  doc.font("Helvetica").fontSize(metaFontSize);
+  const numLblW = doc.widthOfString(numLabel);
+  doc.text(numLabel, numValX - numLblW, metaTop, { lineBreak: false });
+
+  // Date
+  const dateLabel = "Date : ";
+  const dateValue = dayjs(devis?.createdAt || Date.now()).format("DD/MM/YYYY HH:mm");
+  doc.font("Helvetica-Bold").fontSize(metaFontSize);
+  const dateValW = doc.widthOfString(dateValue);
+  const dateValX = RIGHT - dateValW;
+  doc.text(dateValue, dateValX, metaTop + 16, { lineBreak: false });
+
+  doc.font("Helvetica").fontSize(metaFontSize);
+  const dateLblW = doc.widthOfString(dateLabel);
+  doc.text(dateLabel, dateValX - dateLblW, metaTop + 16, { lineBreak: false });
 
   rule(metaTop + 28);
   y = metaTop + 38;
@@ -207,7 +223,7 @@ export function buildDevisCompressionPDF(devis = {}) {
   if (imgExtr || imgDim) {
     y = section("Schéma", y);
     const gap = 18;
-    const colW = Math.floor((INNER_W - gap) / 2);
+    const colW = Math.floor((INNER_W - gap) / 2);  // ← correction de la coquille
     const leftW = Math.min(colW, 360);
     const rightW = Math.min(colW, 360);
 
