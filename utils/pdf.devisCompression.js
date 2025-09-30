@@ -93,16 +93,20 @@ export function buildDevisCompressionPDF(devis = {}) {
     }
   };
 
-  /* ===== En-tête (alignement logo ↔ titre) ===== */
+  /* ===== En-tête (لوغو + عنوان طالعين لفوووق) ===== */
   const logoPath = tryImage(["assets/logo.png"]);
-  const HEADER_Y = TOP - 2;       // ligne de référence pour les éléments du bandeau
 
-  // Logo (même taille, mais plus haut : sur la même ligne que le titre)
+  // نطلّع ال-header كله لفوق ~28px مع هامش أمان 10px من فوق
+  const SAFE_TOP = 10;
+  const HEADER_SHIFT_UP = 28;                 // بدّلها إذا تحبّه يطلع/يهبط
+  const HEADER_Y = Math.max(SAFE_TOP, TOP - HEADER_SHIFT_UP);
+
+  // Logo كبير وعلى نفس خط العنوان تقريبًا
   const logoW = 230, logoHMax = 110;
-  const logoY = HEADER_Y - 12;    // remonte le logo pour l’aligner visuellement au titre
+  const logoY = Math.max(SAFE_TOP - 2, HEADER_Y - 14); // يطلع شوية أكثر باش يبان في نفس السطر
   if (logoPath) doc.image(logoPath, LEFT, logoY, { fit: [logoW, logoHMax] });
 
-  // Titre principal centré, exactement sur HEADER_Y
+  // Titre الرئيسي (على نفس خط HEADER_Y)
   const titleTop = HEADER_Y;
   doc
     .fillColor(PRIMARY)
@@ -110,16 +114,16 @@ export function buildDevisCompressionPDF(devis = {}) {
     .fontSize(20)
     .text("Demande de devis", LEFT, titleTop, { width: INNER_W, align: "center" });
 
-  // Sous-titre juste en dessous (espacement dynamique)
+  // Sous-titre تحتو مباشرة
   const h1 = doc.heightOfString("Demande de devis", { width: INNER_W });
-  const subTop = titleTop + h1 + 5;
+  const subTop = titleTop + h1 + 4;
   doc
     .font("Helvetica-Bold")
     .fontSize(22)
     .fillColor(PRIMARY)
     .text("Ressorts de Compression", LEFT, subTop, { width: INNER_W, align: "center" });
 
-  // Méta à droite (après le sous-titre)
+  // Méta على اليمين
   const subH = doc.heightOfString("Ressorts de Compression", { width: INNER_W });
   const metaTop = subTop + subH + 6;
 
