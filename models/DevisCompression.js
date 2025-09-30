@@ -3,15 +3,14 @@ import mongoose from "mongoose";
 import { devisBase } from "./_devisBase.js";
 
 const spec = new mongoose.Schema({
-  d: { type: Number, required: true },   // diamètre du fil (d)
-  DE: { type: Number, required: true },   // diamètre extérieur (DE)
-  H: Number,                              // alésage (H)
-  S: Number,                              // guide (S)
-  DI: { type: Number, required: true },   // diamètre intérieur (DI)
-  Lo: { type: Number, required: true },   // longueur libre (Lo)
+  d: { type: Number, required: true },
+  DE: { type: Number, required: true },
+  H: Number,
+  S: Number,
+  DI: { type: Number, required: true },
+  Lo: { type: Number, required: true },
   nbSpires: { type: Number, required: true },
   pas: Number,
-
   quantite: { type: Number, required: true },
   matiere: {
     type: String,
@@ -27,15 +26,18 @@ const spec = new mongoose.Schema({
   extremite: { type: String, enum: ["ERM", "EL", "ELM", "ERNM"] },
 }, { _id: false });
 
-const schema = new mongoose.Schema({});
+// ✅ active les timestamps si pas déjà faits dans devisBase
+const schema = new mongoose.Schema({}, { timestamps: true });
 schema.add(devisBase);
 schema.add({
   spec,
   demandePdf: {
     data: Buffer,
-    contentType: String
-  }
+    contentType: String,
+  },
 });
 
+// ✅ index pour accélérer le $sort (et limiter l’usage mémoire)
+schema.index({ createdAt: -1 }); // ou { date: -1 } si tu tries sur "date"
 
 export default mongoose.model("DemandeDevisCompression", schema);

@@ -4,7 +4,7 @@ import Counter from "../models/Counter.js";
 import { buildDevisCompressionPDF } from "../utils/pdf.devisCompression.js";
 import { makeTransport } from "../utils/mailer.js";
 
-const toNum = (val) => Number(String(val ?? "").replace(",", "."));
+const toNum = (val) => Number(String(val ?? "").replace(",", "."))
 const formatDevisNumber = (year, seq) =>
   `DDV${String(year).slice(-2)}${String(seq).padStart(5, "0")}`;
 

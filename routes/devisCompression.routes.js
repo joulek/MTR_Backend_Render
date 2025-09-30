@@ -114,7 +114,7 @@ router.get("/paginated", auth, only("admin"), async (req, res) => {
       }
     ];
 
-    const [resAgg = { items: [], total: 0 }] = await DevisCompression.aggregate(pipeline).allowDiskUse(true);
+    const [resAgg = { items: [], total: 0 }] = await DevisCompression.aggregate(pipeline, { allowDiskUse: true });
     res.json({ success: true, ...resAgg });
   } catch (e) {
     console.error(e);
