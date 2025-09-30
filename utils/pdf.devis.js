@@ -54,13 +54,14 @@ export async function buildDevisPDF(devis, outDir = "storage/devis") {
 
   const FONT = { tiny: 8, small: 9, normal: 10, section: 13, title: 16, big: 20 };
 
-  const yTopTitle = 40;  // Position verticale du titre
+  /* ===== ENTÊTE ===== */
+  const yTopTitle = 35;  // Position verticale du titre
 
-  // Logo à gauche
+  // Logo à gauche (grande taille)
   const xLogo = M;
   const yLogo = 6;
-  const logoW = 180;  // Réduire un peu la largeur du logo
-  const logoHMax = 85;
+  const logoW = 220;  // Taille d'origine du logo
+  const logoHMax = 100;
   const logoPath = path.resolve("assets/logo.png");
   let logoH = 0;
   if (fs.existsSync(logoPath)) {
@@ -68,33 +69,33 @@ export async function buildDevisPDF(devis, outDir = "storage/devis") {
     logoH = logoHMax;
   }
 
-  // Titre à droite du logo avec espace suffisant
-  const titleX = xLogo + logoW + 25;  // 25px d'espace entre logo et titre
-  const titleW = innerW - logoW - 25;  // Largeur restante pour le titre
+  // Titre à droite du logo - décalé vers le bas pour éviter le chevauchement
+  const titleX = xLogo + logoW + 20;  // 20px d'espace entre logo et titre
+  const titleW = innerW - logoW - 20;  // Largeur restante pour le titre
 
+  // Décaler le titre plus bas pour qu'il ne chevauche pas le logo
   doc.font("Helvetica-Bold").fontSize(FONT.big)
-    .text("FABRICATION TOUT ARTICLE", titleX, yTopTitle, {
+    .text("FABRICATION TOUT ARTICLE", titleX, yTopTitle + 15, {
       width: titleW,
-      align: "left",
-      lineBreak: true  // Permet le retour à la ligne
+      align: "left"
     });
 
   doc.font("Helvetica-Bold").fontSize(FONT.big)
-    .text("EN FIL METALLIQUE", titleX, yTopTitle + 22, {
+    .text("EN FIL METALLIQUE", titleX, yTopTitle + 37, {
       width: titleW,
       align: "left"
     });
 
   doc.font("Helvetica").fontSize(11)
-    .text("Conception et Fabrication des Ressorts", titleX, yTopTitle + 50, {
+    .text("Conception et Fabrication des Ressorts", titleX, yTopTitle + 63, {
       width: titleW
     })
-    .text("Dressage fils, Cambrage, Cintrage fils et tubes", titleX, yTopTitle + 65, {
+    .text("Dressage fils, Cambrage, Cintrage fils et tubes", titleX, yTopTitle + 78, {
       width: titleW
     });
 
   // Bas réel du bloc titre
-  const titleBottom = yTopTitle + 65 + 14;
+  const titleBottom = yTopTitle + 78 + 14;
 
   /* ===== 2 CADRES ===== */
   const infoYBase = 118;
