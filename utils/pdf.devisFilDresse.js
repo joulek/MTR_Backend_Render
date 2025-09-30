@@ -11,8 +11,8 @@ export function buildDevisFilDressePDF(devis = {}) {
   const chunks = [];
   doc.on("data", (c) => chunks.push(c));
 
-  /* ===== Style tokens (identiques aux autres) ===== */
-  const PRIMARY = "#0B2A55";
+  /* ===== Style tokens (alignés avec les autres) ===== */
+  const PRIMARY = "#002147";     // bleu marine MTR
   const LIGHT   = "#F5F7FB";
   const BORDER  = "#D5D9E4";
   const TXT     = "#111";
@@ -87,26 +87,60 @@ export function buildDevisFilDressePDF(devis = {}) {
     adresse: get(user, ["adresse", "address", "location.address"]),
   };
 
+  /* ===== En-tête (logo + titres) ===== */
+  // Réglages indépendants pour descendre le titre et monter le logo
+  const SAFE_TOP = 10;
+  const HEADER_SHIFT_UP   = 28;   // bouger tout le bandeau si besoin
+  const HEADER_Y          = Math.max(SAFE_TOP, TOP - HEADER_SHIFT_UP);
+  const TITLE_OFFSET_DOWN = 36;   // ↓ titre plus bas
+  const LOGO_EXTRA_UP     = 18;   // ↑ logo plus haut
 
-
-  /* ===== En-tête (avec logo) ===== */
   const logoPath = tryImage(["assets/logo.png"]);
+  const logoW = 210, logoHMax = 100;
+  const logoY = Math.max(SAFE_TOP - 2, HEADER_Y - 12 - LOGO_EXTRA_UP);
   if (logoPath) {
-    // ↑ Agrandi : largeur max 180, hauteur max 85 (ratio conservé)
-    doc.image(logoPath, LEFT, y - 6, { fit: [180, 85] });
+    doc.image(logoPath, LEFT, logoY, { fit: [logoW, logoHMax] });
   }
 
-  doc.fillColor(TXT).font("Helvetica-Bold").fontSize(17)
-     .text("Demande de devis", LEFT, y + 4, { width: INNER_W, align: "center" });
-  doc.font("Helvetica-Bold").fontSize(19)
-     .text("Fil dressé", LEFT, y + 24, { width: INNER_W, align: "center" });
+  // Titres en bleu marine
+  const titleTop = HEADER_Y + TITLE_OFFSET_DOWN;
+  doc.fillColor(PRIMARY).font("Helvetica-Bold").fontSize(20)
+     .text("Demande de devis", LEFT, titleTop, { width: INNER_W, align: "center" });
 
-  const metaTop = y + 24 + doc.heightOfString("Fil dressé", { width: INNER_W }) + 6;
-  const metaNum = numero ? `N° : ${numero}` : _id ? `ID : ${_id}` : "";
-  doc.font("Helvetica").fontSize(10).fillColor(TXT)
-     .text(metaNum, LEFT, metaTop, { width: INNER_W, align: "right" })
-     .text(`Date : ${dayjs(createdAt || Date.now()).format("DD/MM/YYYY HH:mm")}`,
-           LEFT, metaTop + 14, { width: INNER_W, align: "right" });
+  const h1 = doc.heightOfString("Demande de devis", { width: INNER_W });
+  const subTop = titleTop + h1 + 4;
+  doc.font("Helvetica-Bold").fontSize(22).fillColor(PRIMARY)
+     .text("Fil dressé", LEFT, subTop, { width: INNER_W, align: "center" });
+
+  // Méta (droite) : libellé normal, **valeur en gras**
+  const subH = doc.heightOfString("Fil dressé", { width: INNER_W });
+  const metaTop = subTop + subH + 6;
+
+  const metaFontSize = 10;
+
+  // N°
+  const numLabel = "N° : ";
+  const numValue = numero ? String(numero) : (_id ? String(_id) : "");
+  doc.font("Helvetica-Bold").fontSize(metaFontSize);
+  const numValW = doc.widthOfString(numValue);
+  const numValX = RIGHT - numValW;
+  doc.text(numValue, numValX, metaTop, { lineBreak: false });
+
+  doc.font("Helvetica").fontSize(metaFontSize);
+  const numLblW = doc.widthOfString(numLabel);
+  doc.text(numLabel, numValX - numLblW, metaTop, { lineBreak: false });
+
+  // Date
+  const dateLabel = "Date : ";
+  const dateValue = dayjs(createdAt || Date.now()).format("DD/MM/YYYY HH:mm");
+  doc.font("Helvetica-Bold").fontSize(metaFontSize);
+  const dateValW = doc.widthOfString(dateValue);
+  const dateValX = RIGHT - dateValW;
+  doc.text(dateValue, dateValX, metaTop + 14, { lineBreak: false });
+
+  doc.font("Helvetica").fontSize(metaFontSize);
+  const dateLblW = doc.widthOfString(dateLabel);
+  doc.text(dateLabel, dateValX - dateLblW, metaTop + 14, { lineBreak: false });
 
   rule(metaTop + 24);
   y = metaTop + 34;
@@ -244,6 +278,13 @@ export function buildDevisFilDressePDF(devis = {}) {
     }
   }
 
+  /* ===== Footer ===== */
+  if (y + 48 > BOTTOM) { doc.addPage(); y = TOP; }
+  rule(BOTTOM - 54);
+  doc.font("Helvetica").fontSize(8).fillColor("#666")
+     .text("Document généré automatiquement — MTR Industry", LEFT, BOTTOM - 46, {
+       width: INNER_W, align: "center",
+     });
 
   doc.end();
   return new Promise((resolve) => doc.on("end", () => resolve(Buffer.concat(chunks))));
