@@ -12,12 +12,12 @@ import DemandeFilDresse from "../models/DevisFilDresse.js";
 import DemandeGrille from "../models/DevisGrille.js";
 import ClientOrder from "../models/ClientOrder.js";
 import User from "../models/User.js";
-
+import Devis from "../models/Devis.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const ORIGIN =
-  process.env.PUBLIC_BACKEND_URL || `http://localhost:${process.env.PORT }`;
+  process.env.PUBLIC_BACKEND_URL || `http://localhost:${process.env.PORT || 4000}`;
 
 const DEMANDE_MODELS = [
   { type: "autre", Model: DemandeAutre },
@@ -82,23 +82,76 @@ function isValidEmail(s) {
 /** POST /api/order/client/commander */
 export async function placeClientOrder(req, res) {
   try {
-    const { demandeId, devisNumero, devisPdf, demandeNumero, note = "" } = req.body || {};
+    const {
+      devisId,               // <<=== NEW obligatoire
+      devisNumero: bodyDevisNumero,
+      devisPdf: bodyDevisPdf,
+      note = ""
+    } = req.body || {};
+
     const userId = req.user?.id || req.user?._id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Non authentifié" });
+    }
+    if (!devisId) {
+      return res.status(400).json({ success: false, message: "devisId manquant" });
+    }
 
-    if (!userId) return res.status(401).json({ success: false, message: "Non authentifié" });
-    if (!demandeId) return res.status(400).json({ success: false, message: "demandeId manquant" });
+    // 1) Charger le devis et vérifier la propriété (client.id === userId)
+    const devis = await Devis.findById(devisId).lean();
+    if (!devis) {
+      return res.status(404).json({ success: false, message: "Devis introuvable" });
+    }
+    const ownerId = String(devis?.client?.id || "");
+    if (!ownerId || String(ownerId) !== String(userId)) {
+      return res.status(403).json({ success: false, message: "Accès interdit" });
+    }
 
-    const owned = await findOwnedDemande(demandeId, userId);
-    if (!owned) return res.status(403).json({ success: false, message: "Accès interdit" });
-    const { type, doc: demande } = owned;
+    // 2) Préparer infos issues du devis
+    const devisNumero = bodyDevisNumero || devis.numero || null;
+    const devisPdf =
+      bodyDevisPdf ||
+      (devisNumero ? `${ORIGIN}/files/devis/${encodeURIComponent(devisNumero)}.pdf` : null);
 
-    await ClientOrder.findOneAndUpdate(
-      { user: userId, demandeId },
-      { $set: { status: "confirmed", demandeType: type, devisNumero: devisNumero || null } },
+    // Regrouper les N° de demandes & types (multi-DDV)
+    const demandeNumerosSet = new Set([
+      ...(Array.isArray(devis?.meta?.demandes)
+        ? devis.meta.demandes.map((d) => d?.numero).filter(Boolean)
+        : []),
+      devis?.demandeNumero || "",
+      devis?.meta?.demandeNumero || "",
+      ...(Array.isArray(devis?.items)
+        ? devis.items.map((it) => it?.demandeNumero).filter(Boolean)
+        : []),
+    ].filter(Boolean));
+
+    const demandeNumeros = Array.from(demandeNumerosSet);
+    const primaryDemandeNumero = demandeNumeros[0] || null;
+
+    const typesSet = new Set([
+      ...(Array.isArray(devis?.meta?.demandes)
+        ? devis.meta.demandes.map((d) => d?.type).filter(Boolean)
+        : []),
+    ]);
+    const types = Array.from(typesSet);
+
+    // 3) Upsert ClientOrder par (user, devisId)
+    const orderDoc = await ClientOrder.findOneAndUpdate(
+      { user: userId, devisId },
+      {
+        $set: {
+          status: "confirmed",
+          devisNumero: devisNumero || null,
+          devisPdf: devisPdf || null,
+          demandeNumeros,
+          demandeType: types[0] || null, // pour compat si tu as un champ unique
+          note: note || "",
+        },
+      },
       { upsert: true, new: true }
     );
 
-    // Infos client
+    // 4) Infos client pour email
     const dbUser = await User.findById(userId)
       .select("prenom nom email tel numTel")
       .lean()
@@ -112,14 +165,13 @@ export async function placeClientOrder(req, res) {
       ? `${uPrenom} ${uNom}`.trim()
       : (uEmail || "Client");
 
-    // Sujet & pièces jointes
-    const subject =
-      `Commande confirmée – ${devisNumero ? `Devis ${devisNumero}` : `Demande ${demandeNumero || demande.numero || demandeId}`}`;
+    // 5) Sujet & pièces jointes
+    const subject = `Commande confirmée – ${devisNumero ? `Devis ${devisNumero}` : `Devis ${devisId}`}`;
 
     const devisAttachment = buildAttachmentFromPdfInfo(devisNumero, devisPdf);
-    const devisLink = devisPdf || (devisNumero ? `${ORIGIN}/files/devis/${devisNumero}.pdf` : null);
+    const devisLink = devisPdf;
 
-    // Texte fallback
+    // 6) Corps texte
     const lines = [
       `Bonjour,`,
       ``,
@@ -127,22 +179,22 @@ export async function placeClientOrder(req, res) {
       `• Client : ${clientDisplay}`,
       `• Email : ${uEmail || "-"}`,
       `• Téléphone : ${uTel || "-"}`,
-      `• N° Demande : ${demandeNumero || demande.numero || demandeId}`,
-      devisNumero ? `• N° Devis : ${devisNumero}` : null,
+      devisNumero ? `• N° Devis : ${devisNumero}` : `• Devis ID : ${devisId}`,
+      demandeNumeros.length ? `• N° Demandes liées : ${demandeNumeros.join(", ")}` : null,
+      types.length ? `• Types : ${types.join(", ")}` : null,
       devisLink ? `• Lien PDF devis : ${devisLink}` : null,
-      `• Type : ${type}`,
       note ? `• Note : ${note}` : null,
       ``,
       `Merci.`,
     ].filter(Boolean);
     const textBody = lines.join("\n");
 
-    // Styles & couleurs
-    const BRAND_PRIMARY = "#002147";   // titres/links
-    const BAND_DARK = "#0B2239";   // bleu marine foncé pour les bandes (comme ta capture)
-    const BAND_TEXT = "#FFFFFF";   // texte en blanc dans les bandes foncées
-    const PAGE_BG = "#F5F7FB";   // fond général clair
-    const CONTAINER_W = 680;         // largeur du container
+    // 7) Email HTML (identique à ton style, compacté)
+    const BRAND_PRIMARY = "#002147";
+    const BAND_DARK = "#0B2239";
+    const BAND_TEXT = "#FFFFFF";
+    const PAGE_BG = "#F5F7FB";
+    const CONTAINER_W = 680;
     const SITE_HOST = getSiteHost(req);
     const html = `<!doctype html>
 <html>
@@ -152,97 +204,56 @@ export async function placeClientOrder(req, res) {
     <title>${subject}</title>
   </head>
   <body style="margin:0;background:${PAGE_BG};font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,'Apple Color Emoji','Segoe UI Emoji';color:#111827;">
-
-    <!-- Wrapper plein écran -->
     <table role="presentation" cellpadding="0" cellspacing="0" border="0"
-           style="width:100%;background:${PAGE_BG};margin:0;padding:24px 16px;border-collapse:collapse;border-spacing:0;mso-table-lspace:0pt;mso-table-rspace:0pt;">
-      <tr>
-        <td align="center" style="padding:0;margin:0;">
-
-          <!-- Conteneur centré -->
-          <table role="presentation" cellpadding="0" cellspacing="0" border="0"
-                 style="width:${CONTAINER_W}px;max-width:100%;border-collapse:collapse;border-spacing:0;mso-table-lspace:0pt;mso-table-rspace:0pt;">
-
-            <!-- Bande TOP -->
-            <tr>
-              <td style="padding:0;">
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
-                       style="border-collapse:collapse;border-spacing:0;">
-                  <tr>
-                    <td style="background:${BAND_DARK};color:${BAND_TEXT};text-align:center;
-                               padding:14px 20px;font-weight:800;font-size:14px;letter-spacing:.3px;
-                               border-radius:8px;box-sizing:border-box;width:100%;">
-                      MTR – Manufacture Tunisienne des ressorts
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>
-
-            <!-- Espace vertical -->
-            <tr><td style="height:16px;line-height:16px;font-size:0;">&nbsp;</td></tr>
-
-            <!-- Carte contenu (padding géré ici, pas sur les bandes) -->
-            <tr>
-              <td style="padding:0;">
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
-                       style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;
-                              border-collapse:separate;box-sizing:border-box;">
-                  <tr>
-                    <td style="padding:24px;">
-                      <h1 style="margin:0 0 12px 0;font-size:18px;line-height:1.35;color:${BRAND_PRIMARY};"></h1>
-                      <p style="margin:0 0 12px 0;">Bonjour, Vous avez reçu une nouvelle commande&nbsp;:</p>
-                      <ul style="margin:0 0 16px 20px;padding:0;">
-                        <li><strong>Client&nbsp;:</strong> ${clientDisplay}</li>
-                        <li><strong>Email&nbsp;:</strong> ${uEmail || "-"}</li>
-                        <li><strong>Téléphone&nbsp;:</strong> ${uTel || "-"}</li>
-                        <li><strong>Type&nbsp;:</strong> ${type}</li>
-                        <li><strong>N° Demande&nbsp;:</strong> ${demandeNumero || demande.numero || demandeId}</li>
-                        ${devisNumero ? `<li><strong>N° Devis&nbsp;:</strong> ${devisNumero}</li>` : ""}
-                        ${note ? `<li><strong>Note&nbsp;:</strong> ${note}</li>` : ""}
-                      </ul>
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>
-
-            <!-- Espace vertical -->
-            <tr><td style="height:16px;line-height:16px;font-size:0;">&nbsp;</td></tr>
-
-            <!-- Bande BOTTOM (identique à TOP) -->
-            <tr>
-              <td style="padding:0;">
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
-                       style="border-collapse:collapse;border-spacing:0;">
-                  <tr>
-                    <td style="background:${BAND_DARK};color:${BAND_TEXT};text-align:center;
-                               padding:14px 20px;font-weight:800;font-size:14px;letter-spacing:.3px;
-                               border-radius:8px;box-sizing:border-box;width:100%;">
-                      &nbsp;
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>
-
-          </table>
-        </td>
-      </tr>
+           style="width:100%;background:${PAGE_BG};margin:0;padding:24px 16px;border-collapse:collapse;">
+      <tr><td align="center">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+               style="width:${CONTAINER_W}px;max-width:100%;border-collapse:collapse;">
+          <tr>
+            <td style="background:${BAND_DARK};color:${BAND_TEXT};text-align:center;padding:14px 20px;font-weight:800;font-size:14px;letter-spacing:.3px;border-radius:8px;">
+              MTR – Manufacture Tunisienne des ressorts
+            </td>
+          </tr>
+          <tr><td style="height:16px;line-height:16px;font-size:0;">&nbsp;</td></tr>
+          <tr>
+            <td>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                     style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;border-collapse:separate;">
+                <tr><td style="padding:24px;">
+                  <p style="margin:0 0 12px 0;">Bonjour, Vous avez reçu une nouvelle commande&nbsp;:</p>
+                  <ul style="margin:0 0 16px 20px;padding:0;">
+                    <li><strong>Client&nbsp;:</strong> ${clientDisplay}</li>
+                    <li><strong>Email&nbsp;:</strong> ${uEmail || "-"}</li>
+                    <li><strong>Téléphone&nbsp;:</strong> ${uTel || "-"}</li>
+                    ${devisNumero ? `<li><strong>N° Devis&nbsp;:</strong> ${devisNumero}</li>` : `<li><strong>Devis ID&nbsp;:</strong> ${devisId}</li>`}
+                    ${demandeNumeros.length ? `<li><strong>Demandes liées&nbsp;:</strong> ${demandeNumeros.join(", ")}</li>` : ""}
+                    ${types.length ? `<li><strong>Types&nbsp;:</strong> ${types.join(", ")}</li>` : ""}
+                    ${note ? `<li><strong>Note&nbsp;:</strong> ${note}</li>` : ""}
+                  </ul>
+                  ${devisLink ? `<p style="margin:0;"><a href="${devisLink}" style="color:${BRAND_PRIMARY};text-decoration:underline;">Ouvrir le devis (PDF)</a></p>` : ""}
+                </td></tr>
+              </table>
+            </td>
+          </tr>
+          <tr><td style="height:16px;line-height:16px;font-size:0;">&nbsp;</td></tr>
+          <tr>
+            <td style="background:${BAND_DARK};color:${BAND_TEXT};text-align:center;padding:14px 20px;font-weight:800;font-size:14px;letter-spacing:.3px;border-radius:8px;">
+              &nbsp;
+            </td>
+          </tr>
+        </table>
+      </td></tr>
     </table>
   </body>
 </html>`;
 
-
-
-    // Destinataires & expéditeur
+    // 8) Envoi email
     const adminToRaw = (process.env.ADMIN_EMAIL || "").trim();
     const adminTo = isValidEmail(adminToRaw) ? adminToRaw : "joulekyosr123@gmail.com";
     const from = (process.env.MAIL_FROM || "").trim() || `MTR <no-reply@mtr.tn>`;
     const cc = isValidEmail(uEmail) ? [uEmail] : undefined;
 
     const transport = makeTransport();
-
     await transport.sendMail({
       from,
       to: adminTo,
@@ -254,12 +265,13 @@ export async function placeClientOrder(req, res) {
       attachments: devisAttachment ? [devisAttachment] : [],
     });
 
-    return res.json({ success: true, message: "Commande confirmée" });
+    return res.json({ success: true, message: "Commande confirmée", orderId: orderDoc?._id });
   } catch (err) {
     console.error("placeClientOrder error:", err);
     return res.status(500).json({ success: false, message: "Erreur envoi commande" });
   }
 }
+
 
 /** GET /api/order/client/status?ids=ID1,ID2,... => { map: { [demandeId]: boolean } } */
 export async function getClientOrderStatus(req, res) {

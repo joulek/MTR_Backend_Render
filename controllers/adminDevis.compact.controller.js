@@ -1,12 +1,128 @@
 import Devis from "../models/Devis.js";
-import DemandeCompression from "../models/DevisCompression.js";
-import DemandeTraction from "../models/DevisTraction.js";
-import DemandeTorsion from "../models/DevisTorsion.js";
-import DemandeFil from "../models/DevisFilDresse.js";
-import DemandeGrille from "../models/DevisGrille.js";
-import DemandeAutre from "../models/DevisAutre.js";
+import mongoose from "mongoose";
+const ORIGIN = process.env.PUBLIC_BACKEND_URL || `http://localhost:${process.env.PORT || 4000}`;
 
-const ORIGIN = process.env.PUBLIC_BACKEND_URL || `http://localhost:${process.env.PORT}`;
+// controllers/devis.client.controller.js
+
+
+const toObjectId = (v) => {
+  try { return new mongoose.Types.ObjectId(String(v)); } catch { return null; }
+};
+
+const esc = (s = "") => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * GET /api/client/devis
+ * Query:
+ *  - q     : recherche (numero, demandes, items.designation)
+ *  - page  : 1..N
+ *  - limit : 1..100
+ *  - from  : ISO date (>= createdAt)
+ *  - to    : ISO date (<= createdAt)
+ *
+ * Nécessite req.user._id (via authRequired)
+ */
+// controllers/devis.client.controller.js
+
+export async function listMyDevis(req, res) {
+  try {
+    const userId = req.user?._id || req.user?.id || req.query.clientId;
+    const oid = toObjectId(userId);
+    if (!oid) return res.status(401).json({ success: false, message: "Non autorisé" });
+
+    const page  = Math.max(1, parseInt(req.query.page ?? "1", 10));
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit ?? "20", 10)));
+    const skip  = (page - 1) * limit;
+    const q     = (req.query.q || "").toString().trim();
+    const from  = req.query.from ? new Date(req.query.from) : null;
+    const to    = req.query.to   ? new Date(req.query.to)   : null;
+
+    const match = { "client.id": oid };
+    if (from || to) {
+      match.createdAt = {};
+      if (from && !Number.isNaN(from.getTime())) match.createdAt.$gte = from;
+      if (to && !Number.isNaN(to.getTime()))     match.createdAt.$lte = to;
+      if (!Object.keys(match.createdAt).length) delete match.createdAt;
+    }
+    if (q) {
+      const rx = new RegExp(esc(q), "i");
+      match.$or = [
+        { numero: rx },
+        { demandeNumero: rx },
+        { "meta.demandeNumero": rx },
+        { "meta.demandes.numero": rx },
+        { "meta.demandes.type": rx },
+        { "items.designation": rx },
+        { "items.demandeNumero": rx },
+      ];
+    }
+
+    const pipeline = [
+      { $match: match },
+      {
+        $project: {
+          _id: 1,                                        // ✅ لازم
+          numero: 1,
+          createdAt: 1,
+          devisPdf: { $concat: [ORIGIN, "/files/devis/", "$numero", ".pdf"] },
+          allDemNums: {
+            $setUnion: [
+              { $ifNull: ["$meta.demandes.numero", []] },
+              [
+                { $ifNull: ["$demandeNumero", null] },
+                { $ifNull: ["$meta.demandeNumero", null] }
+              ],
+              { $ifNull: ["$items.demandeNumero", []] }
+            ]
+          },
+          allTypes: { $setUnion: [ { $ifNull: ["$meta.demandes.type", []] } ] },
+          totalTTC: "$totaux.mttc"
+        }
+      },
+      {
+        $project: {
+          _id: 1,
+          numero: 1,
+          createdAt: 1,
+          devisPdf: 1,
+          totalTTC: 1,
+          demandeNumeros: {
+            $setDifference: [
+              { $filter: { input: "$allDemNums", as: "n", cond: { $and: [ { $ne: ["$$n", null] }, { $ne: ["$$n", ""] } ] } } },
+              [null, ""]
+            ]
+          },
+          types: {
+            $setDifference: [
+              { $filter: { input: "$allTypes", as: "t", cond: { $and: [ { $ne: ["$$t", null] }, { $ne: ["$$t", ""] } ] } } },
+              [null, ""]
+            ]
+          }
+        }
+      },
+      { $sort: { createdAt: -1 } },
+      { $facet: { meta:  [{ $count: "total" }], items: [{ $skip: skip }, { $limit: limit }] } },
+      { $project: { total: { $ifNull: [ { $arrayElemAt: ["$meta.total", 0] }, 0 ] }, items: 1 } }
+    ];
+
+    const [agg = { total: 0, items: [] }] = await Devis.aggregate(pipeline).allowDiskUse(true);
+
+    const items = (agg.items || []).map((d) => ({
+      devisId: d._id?.toString(),                        // ✅ هنا
+      devisNumero: d.numero,
+      devisPdf: d.devisPdf,
+      demandeNumeros: d.demandeNumeros || [],
+      types: d.types || [],
+      totalTTC: d.totalTTC ?? 0,
+      date: d.createdAt
+    }));
+
+    return res.json({ success: true, page, limit, total: agg.total || 0, items });
+  } catch (e) {
+    console.error("listMyDevis error:", e);
+    return res.status(500).json({ success: false, message: "Erreur serveur" });
+  }
+}
 
 /**
  * GET /api/admin/devis/compact?type=all|compression|traction|torsion|fil|grille|autre&q=...&page=1&limit=20
@@ -14,15 +130,16 @@ const ORIGIN = process.env.PUBLIC_BACKEND_URL || `http://localhost:${process.env
  */
 export async function listDevisCompact(req, res) {
   try {
-    const page = Math.max(1, parseInt(req.query.page ?? "1", 10));
+    const page  = Math.max(1, parseInt(req.query.page ?? "1", 10));
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit ?? "20", 10)));
-    const skip = (page - 1) * limit;
-    const type = (req.query.type || "all").toString().toLowerCase();
-    const q = (req.query.q || "").toString().trim();
+    const skip  = (page - 1) * limit;
+    const type  = (req.query.type || "all").toString().toLowerCase();
+    const q     = (req.query.q || "").toString().trim();
 
+    // مطابقة (match) باستعمال الفهارس اللي فوق
     const match = {};
     if (type && type !== "all") {
-      match["meta.demandes.type"] = type;
+      match["meta.demandes.type"] = type; // انت تخزّن type داخل linkSchema
     }
     if (q) {
       const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
@@ -32,36 +149,21 @@ export async function listDevisCompact(req, res) {
         { demandeNumero: rx },
         { "meta.demandeNumero": rx },
         { "client.nom": rx },
-        { "client.prenom": rx },
-        { "client.firstName": rx },
-        { "client.lastName": rx },
       ];
     }
 
     const pipeline = [
       { $match: match },
+      // حضّر أرقام الـ demandes و الأنواع من meta + الحقل القديم
       {
         $project: {
           numero: 1,
           createdAt: 1,
+          clientNom: "$client.nom",
           devisPdf: { $concat: [ORIGIN, "/files/devis/", "$numero", ".pdf"] },
-
-          clientPrenom: {
-            $ifNull: [
-              "$client.prenom",
-              { $ifNull: ["$client.firstName", { $ifNull: ["$prenom", "$firstName"] }] }
-            ]
-          },
-          clientNom: {
-            $ifNull: [
-              "$client.nom",
-              { $ifNull: ["$client.lastName", { $ifNull: ["$nom", "$lastName"] }] }
-            ]
-          },
-
           allDemNums: {
             $setUnion: [
-              { $ifNull: ["$meta.demandes.numero", []] },
+              { $ifNull: ["$meta.demandes.numero", []] }, // إذا كانت map objects، نعمل خطوة أخرى
               [
                 { $ifNull: ["$demandeNumero", null] },
                 { $ifNull: ["$meta.demandeNumero", null] }
@@ -80,54 +182,32 @@ export async function listDevisCompact(req, res) {
         $project: {
           numero: 1,
           createdAt: 1,
+          clientNom: 1,
           devisPdf: 1,
           demandeNumeros: {
             $setDifference: [
-              {
-                $filter: {
-                  input: "$allDemNums",
-                  as: "n",
-                  cond: { $and: [{ $ne: ["$$n", null] }, { $ne: ["$$n", ""] }] }
-                }
-              },
+              { $filter: { input: "$allDemNums", as: "n", cond: { $and: [ { $ne: ["$$n", null] }, { $ne: ["$$n", ""] } ] } } },
               [null, ""]
             ]
           },
           types: {
             $setDifference: [
-              {
-                $filter: {
-                  input: "$allTypes",
-                  as: "t",
-                  cond: { $and: [{ $ne: ["$$t", null] }, { $ne: ["$$t", ""] }] }
-                }
-              },
+              { $filter: { input: "$allTypes", as: "t", cond: { $and: [ { $ne: ["$$t", null] }, { $ne: ["$$t", ""] } ] } } },
               [null, ""]
             ]
-          },
-          client: {
-            $trim: {
-              input: {
-                $concat: [
-                  { $ifNull: ["$clientPrenom", ""] },
-                  " ",
-                  { $ifNull: ["$clientNom", ""] }
-                ]
-              }
-            }
           }
         }
       },
       { $sort: { createdAt: -1 } },
       {
         $facet: {
-          meta: [{ $count: "total" }],
+          meta:  [{ $count: "total" }],
           items: [{ $skip: skip }, { $limit: limit }]
         }
       },
       {
         $project: {
-          total: { $ifNull: [{ $arrayElemAt: ["$meta.total", 0] }, 0] },
+          total: { $ifNull: [ { $arrayElemAt: ["$meta.total", 0] }, 0 ] },
           items: 1
         }
       }
@@ -140,7 +220,7 @@ export async function listDevisCompact(req, res) {
       devisPdf: d.devisPdf,
       demandeNumeros: d.demandeNumeros || [],
       types: d.types || [],
-      client: d.client || "",
+      client: d.clientNom || "",
       date: d.createdAt
     }));
 
@@ -153,205 +233,6 @@ export async function listDevisCompact(req, res) {
     });
   } catch (e) {
     console.error("listDevisCompact error:", e);
-    return res.status(500).json({ success: false, message: "Erreur serveur" });
-  }
-}
-
-
-
-export async function listDemandesCompact(req, res) {
-  try {
-    const page  = Math.max(1, parseInt(req.query.page ?? "1", 10));
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit ?? "20", 10)));
-    const skip  = (page - 1) * limit;
-    const type  = (req.query.type || "all").toString().toLowerCase();
-    const qRaw  = (req.query.q || "").toString().trim();
-
-    const rx = qRaw ? new RegExp(qRaw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") : null;
-
-    const bases = [
-      { model: DemandeCompression, t: "compression" },
-      { model: DemandeTraction,    t: "traction" },
-      { model: DemandeTorsion,     t: "torsion" },
-      { model: DemandeFil,         t: "fil" },
-      { model: DemandeGrille,      t: "grille" },
-      { model: DemandeAutre,       t: "autre" },
-    ];
-    const base = bases[0];
-    const unions = bases.slice(1);
-
-    const mkMatch = () => {
-      if (!rx) return [];
-      return [{
-        $match: {
-          $or: [
-            { numero: rx },
-            { devisNumero: rx },
-            { "devis.numero": rx },
-            { "client.nom": rx },
-            { "client.prenom": rx },
-            // recherche via user (après lookup)
-            { "__user.prenom": rx },
-            { "__user.nom": rx },
-            { "__user.firstName": rx },
-            { "__user.lastName": rx },
-            { "__user.email": rx },
-          ]
-        }
-      }];
-    };
-
-    // ---- Étapes communes par collection (inclut $lookup users) ----
-    const commonStages = (typeLiteral) => ([
-      // 1) ramener l’utilisateur si le doc contient `user: ObjectId`
-      {
-        $lookup: {
-          from: "users",
-          localField: "user",
-          foreignField: "_id",
-          as: "__userArr",
-        }
-      },
-      {
-        $addFields: {
-          __user: { $ifNull: [ { $arrayElemAt: ["$__userArr", 0] }, null ] }
-        }
-      },
-
-      // 2) normaliser champs
-      {
-        $addFields: {
-          __keepId: "$_id",
-          __devisNumero: { $ifNull: ["$devisNumero", "$devis.numero"] },
-
-          // ordre prioritaire: client.prenom -> client.firstName -> this.prenom -> user.prenom/firstName
-          __first: {
-            $ifNull: [
-              "$client.prenom",
-              { $ifNull: [
-                "$client.firstName",
-                { $ifNull: [
-                  "$prenom",
-                  { $ifNull: [
-                    "$firstName",
-                    { $ifNull: ["$__user.prenom", "$__user.firstName"] }
-                  ] }
-                ] }
-              ] }
-            ]
-          },
-          __last: {
-            $ifNull: [
-              "$client.nom",
-              { $ifNull: [
-                "$client.lastName",
-                { $ifNull: [
-                  "$nom",
-                  { $ifNull: ["$lastName", { $ifNull: ["$__user.nom", "$__user.lastName"] }] }
-                ] }
-              ] }
-            ]
-          },
-
-          __email:   { $ifNull: [ "$client.email",   { $ifNull: [ "$email",   "$__user.email"   ] } ] },
-          __numTel:  { $ifNull: [ "$client.numTel",  { $ifNull: [ "$numTel",  "$__user.numTel"  ] } ] },
-
-          __hasDemandePdf: { $ne: ["$demandePdf", null] },
-
-          // compter pièces jointes (pas besoin des binaires ici)
-          __attachmentsCount: {
-            $cond: [
-              { $isArray: "$documents" },
-              { $size: "$documents" },
-              0
-            ]
-          }
-        }
-      },
-
-      // 3) projection compacte pour la liste
-      {
-        $project: {
-          _id: "$__keepId",
-          demandeNumero: "$numero",
-          type: { $literal: typeLiteral },
-          devisNumero: "$__devisNumero",
-          clientName: {
-            $trim: { input: { $concat: [ { $ifNull: ["$__first", ""] }, " ", { $ifNull: ["$__last", ""] } ] } }
-          },
-          client: {
-            prenom:  { $ifNull: ["$__first",  ""] },
-            nom:     { $ifNull: ["$__last",   ""] },
-            email:   { $ifNull: ["$__email",  ""] },
-            numTel:  { $ifNull: ["$__numTel", ""] },
-          },
-          date: "$createdAt",
-          hasDemandePdf: "$__hasDemandePdf",
-          attachments: "$__attachmentsCount"
-        }
-      }
-    ]);
-
-    const basePipeline = [
-      ...mkMatch(),
-      ...commonStages(base.t),
-    ];
-
-    const unionStages = unions.map(({ model, t }) => ({
-      $unionWith: {
-        coll: model.collection.name,
-        pipeline: [
-          ...mkMatch(),
-          ...commonStages(t),
-        ]
-      }
-    }));
-
-    const finalPipeline = [
-      ...basePipeline,
-      ...unionStages,
-      ...(type !== "all" ? [{ $match: { type } }] : []),
-      { $sort: { date: -1 } },
-      {
-        $facet: {
-          meta:  [{ $count: "total" }],
-          items: [{ $skip: skip }, { $limit: limit }],
-        }
-      },
-      {
-        $project: {
-          total: { $ifNull: [{ $arrayElemAt: ["$meta.total", 0] }, 0] },
-          items: 1
-        }
-      }
-    ];
-
-    const [agg] = await base.model.aggregate(finalPipeline).allowDiskUse(true);
-    const rows = agg?.items || [];
-
-    const items = rows.map((d) => {
-      const ddvPdf   = d.hasDemandePdf ? `${ORIGIN}/api/devis/${d.type}/${d._id}/pdf` : null;
-      const devisPdf = d.devisNumero ? `${ORIGIN}/files/devis/${d.devisNumero}.pdf` : null;
-
-      return {
-        _id: d._id,
-        demandeNumero: d.demandeNumero,
-        type: d.type,
-        devisNumero: d.devisNumero || null,
-        clientName: d.clientName || "",
-        client: d.client || { prenom: "", nom: "", email: "", numTel: "" },
-        date: d.date,
-        hasDemandePdf: !!d.hasDemandePdf,
-        ddvPdf,
-        devisPdf,
-        // juste le nombre (affichage “Fichiers joints”)
-        attachments: Number.isFinite(d.attachments) ? d.attachments : 0,
-      };
-    });
-
-    return res.json({ success: true, page, limit, total: agg?.total || 0, items });
-  } catch (e) {
-    console.error("listDemandesCompact error:", e);
-    return res.status(500).json({ success: false, message: "Erreur serveur" });
+    return res.status(500).json({ success:false, message:"Erreur serveur" });
   }
 }
