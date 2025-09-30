@@ -1,4 +1,4 @@
-// utils/pdf.devisGrille.js  (ou pdf.DevisGrille.js selon ton import)
+// utils/pdf.devisGrille.js
 import PDFDocument from "pdfkit";
 import dayjs from "dayjs";
 import fs from "fs";
@@ -12,7 +12,7 @@ export function buildDevisGrillePDF(devis = {}) {
   doc.on("data", (c) => chunks.push(c));
 
   /* ===== Style tokens (communs aux autres PDFs) ===== */
-  const PRIMARY = "#0B2A55";
+  const PRIMARY = "#002147";     // bleu marine MTR
   const LIGHT   = "#F5F7FB";
   const BORDER  = "#D5D9E4";
   const TXT     = "#111";
@@ -53,19 +53,18 @@ export function buildDevisGrillePDF(devis = {}) {
     return null;
   };
 
-  // Texte forcé sur 1 ligne (réduction auto de taille) — SÉCURISÉ
+  // Texte forcé sur 1 ligne (réduction auto de taille)
   const fitOneLine = ({ text, x, y, width, bold = false, maxSize = 10.5, minSize = 8 }) => {
-    const s = (text === undefined || text === null) ? "" : String(text); // ← évite undefined
     const fontName = bold ? "Helvetica-Bold" : "Helvetica";
     let size = maxSize;
     doc.font(fontName);
     while (size > minSize) {
       doc.fontSize(size);
-      const w = doc.widthOfString(s);
+      const w = doc.widthOfString(text);
       if (w <= width) break;
       size -= 0.5;
     }
-    doc.fontSize(size).text(s, x, y, { width, lineBreak: false, align: "left" });
+    doc.fontSize(size).text(text, x, y, { width, lineBreak: false, align: "left" });
     return size;
   };
 
@@ -107,34 +106,62 @@ export function buildDevisGrillePDF(devis = {}) {
   };
 
   /* ===== En-tête (logo + titres) ===== */
+  // Réglages d'alignement et d'espacement
+  const SAFE_TOP = 10;
+  const HEADER_SHIFT_UP   = 28;   // bouger tout le bandeau si besoin
+  const HEADER_Y          = Math.max(SAFE_TOP, TOP - HEADER_SHIFT_UP);
+  const TITLE_OFFSET_DOWN = 36;   // ↓ descendre le titre
+  const LOGO_EXTRA_UP     = 18;   // ↑ monter le logo
+
   const logoPath = tryImage(["assets/logo.png"]);
-  if (logoPath) doc.image(logoPath, LEFT, y - 6, { fit: [180, 85] });
+  if (logoPath) {
+    const logoW = 210, logoHMax = 100;
+    const logoY = Math.max(SAFE_TOP - 2, HEADER_Y - 12 - LOGO_EXTRA_UP);
+    doc.image(logoPath, LEFT, logoY, { fit: [logoW, logoHMax] });
+  }
 
+  // Titres en bleu marine
+  const titleTop = HEADER_Y + TITLE_OFFSET_DOWN;
   doc
-    .fillColor(TXT)
+    .fillColor(PRIMARY)
     .font("Helvetica-Bold")
-    .fontSize(17)
-    .text("Demande de devis", LEFT, y + 4, { width: INNER_W, align: "center" });
+    .fontSize(20)
+    .text("Demande de devis", LEFT, titleTop, { width: INNER_W, align: "center" });
 
+  const h1 = doc.heightOfString("Demande de devis", { width: INNER_W });
+  const subTop = titleTop + h1 + 4;
   doc
     .font("Helvetica-Bold")
-    .fontSize(19)
-    .text(PRODUCT_LABEL, LEFT, y + 24, { width: INNER_W, align: "center" });
+    .fontSize(22)
+    .fillColor(PRIMARY)
+    .text(PRODUCT_LABEL, LEFT, subTop, { width: INNER_W, align: "center" });
 
-  const metaTop = y + 24 + doc.heightOfString(PRODUCT_LABEL, { width: INNER_W }) + 6;
-  const metaNum = numero ? `N° : ${numero}` : _id ? `ID : ${_id}` : "";
+  // Méta (droite) : libellé normal + valeur en gras
+  const subH = doc.heightOfString(PRODUCT_LABEL, { width: INNER_W });
+  const metaTop = subTop + subH + 6;
+  const metaFontSize = 10;
 
-  doc
-    .font("Helvetica")
-    .fontSize(10)
-    .fillColor(TXT)
-    .text(metaNum, LEFT, metaTop, { width: INNER_W, align: "right" })
-    .text(
-      `Date : ${dayjs(createdAt || Date.now()).format("DD/MM/YYYY HH:mm")}`,
-      LEFT,
-      metaTop + 14,
-      { width: INNER_W, align: "right" }
-    );
+  // N°
+  const numLabel = "N° : ";
+  const numValue = numero ? String(numero) : (_id ? String(_id) : "");
+  doc.font("Helvetica-Bold").fontSize(metaFontSize);
+  const numValW = doc.widthOfString(numValue);
+  const numValX = RIGHT - numValW;
+  doc.text(numValue, numValX, metaTop, { lineBreak: false });
+  doc.font("Helvetica").fontSize(metaFontSize);
+  const numLblW = doc.widthOfString(numLabel);
+  doc.text(numLabel, numValX - numLblW, metaTop, { lineBreak: false });
+
+  // Date
+  const dateLabel = "Date : ";
+  const dateValue = dayjs(createdAt || Date.now()).format("DD/MM/YYYY HH:mm");
+  doc.font("Helvetica-Bold").fontSize(metaFontSize);
+  const dateValW = doc.widthOfString(dateValue);
+  const dateValX = RIGHT - dateValW;
+  doc.text(dateValue, dateValX, metaTop + 14, { lineBreak: false });
+  doc.font("Helvetica").fontSize(metaFontSize);
+  const dateLblW = doc.widthOfString(dateLabel);
+  doc.text(dateLabel, dateValX - dateLblW, metaTop + 14, { lineBreak: false });
 
   rule(metaTop + 24);
   y = metaTop + 34;
@@ -161,35 +188,29 @@ export function buildDevisGrillePDF(devis = {}) {
   const clientPairs = [];
   const pushPair = (k, v) => { if (hasText(v)) clientPairs.push([k, sanitize(v)]); };
 
-  // Nom complet (fallback si user est string/ObjectId)
   const nomComplet =
     [client.prenom, client.nom].filter(Boolean).join(" ") ||
     (typeof user === "string" ? String(user) : safe(user?._id));
 
-  // Identité + méta
   pushPair("Nom", nomComplet);
   pushPair("Type de compte", accountLabel);
   pushPair("Rôle", role);
 
-  // Bloc entreprise (si présent)
   if (accountType === "societe" || hasText(nomSociete) || hasText(mf) || hasText(posteSoc)) {
     pushPair("Raison sociale", nomSociete);
     pushPair("Matricule fiscal", mf);
     pushPair("Poste (société)", posteSoc);
   }
-
-  // Bloc personnel (si présent)
   if (accountType === "personnel" || hasText(cin) || hasText(postePers)) {
     pushPair("CIN", cin);
     pushPair("Poste (personnel)", postePers);
   }
 
-  // Contacts
   pushPair("Email", client.email);
   pushPair("Tél.", client.tel);
   pushPair("Adresse", client.adresse);
 
-  const rowHClient = 18, labelW = 120;
+  const rowHClient = 18, labelW = 120; // libellés longs OK
   const clientBoxH = rowHClient * clientPairs.length + 8;
   ensureSpace(clientBoxH + 12);
 
@@ -203,7 +224,7 @@ export function buildDevisGrillePDF(devis = {}) {
   });
   y += clientBoxH + 14;
 
-  /* ===== Schéma ===== */
+  /* ===== Schéma (images – un peu plus grand) ===== */
   const imgPaths = [
     tryImage(["assets/grille.png", "/mnt/data/grille.png"]),
     tryImage(["assets/grille02.png", "/mnt/data/grille02.png"]),
@@ -244,14 +265,13 @@ export function buildDevisGrillePDF(devis = {}) {
   const s = spec || {};
   const dims = [sanitize(s.L), sanitize(s.l)].filter(Boolean).join(" × ");
 
-  // ⚠️ 4 cellules par ligne obligatoires
   const rows = [
     ["Dimensions (L × l)", dims || "—", "Nb tiges longitudinales", sanitize(s.nbLong)],
     ["Nb tiges transversales", sanitize(s.nbTrans), "Pas longitudinal (pas1)", sanitize(s.pas1)],
-    ["Pas transversal (pas2)", sanitize(s.pas2), "Ø fil (D2)", sanitize(s.D2)],
-    ["Ø fil (D1)", sanitize(s.D1), "Ø fil cadre (D3)", sanitize(s.D3)],
-    ["Quantité", sanitize(s.quantite ?? devis?.quantite), "Matière", sanitize(s.matiere)],
-    ["Finition", sanitize(s.finition), "Type de produit", PRODUCT_LABEL],
+    ["Pas transversal (pas2)", sanitize(s.pas2), "Ø fil tiges (D2)", sanitize(s.D2)],
+    ["Ø fil cadre (D1)", sanitize(s.D1), "Quantité", sanitize(s.quantite ?? devis?.quantite)],
+    ["Matière", sanitize(s.matiere), "Finition", sanitize(s.finition)],
+    ["Type de produit", PRODUCT_LABEL, "", ""],
   ];
 
   const rowH = 28;
@@ -303,6 +323,7 @@ export function buildDevisGrillePDF(devis = {}) {
   }
 
   if (blocks.length) {
+    // Forcer un saut de page : ces sections commencent en 2e page
     doc.addPage();
     y = TOP;
 
@@ -318,7 +339,17 @@ export function buildDevisGrillePDF(devis = {}) {
     }
   }
 
-
+  /* ===== Footer ===== */
+  if (y + 48 > BOTTOM) { doc.addPage(); y = TOP; }
+  rule(BOTTOM - 54);
+  doc
+    .font("Helvetica")
+    .fontSize(8)
+    .fillColor("#666")
+    .text("Document généré automatiquement — MTR Industry", LEFT, BOTTOM - 46, {
+      width: INNER_W,
+      align: "center",
+    });
 
   doc.end();
   return new Promise((resolve) => doc.on("end", () => resolve(Buffer.concat(chunks))));
