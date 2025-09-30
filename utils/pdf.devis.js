@@ -60,8 +60,8 @@ export async function buildDevisPDF(devis, outDir = "storage/devis") {
   // Logo à gauche (grande taille)
   const xLogo = M;
   const yLogo = 6;
-  const logoW = 250;  // Taille d'origine du logo
-  const logoHMax = 120;
+  const logoW = 240;  // Taille d'origine du logo
+  const logoHMax = 100;
   const logoPath = path.resolve("assets/logo.png");
   let logoH = 0;
   if (fs.existsSync(logoPath)) {
