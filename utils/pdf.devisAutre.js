@@ -6,7 +6,7 @@ import path from "path";
 
 /**
  * Construit un PDF (Buffer) pour la demande "Autre article".
- * @param {Object} devis - Doc hydraté (avec user populé si possible)
+ * @param {Object} devis - Doc hydraté (avec user populé si possible)
  * @returns {Promise<Buffer>}
  */
 export function buildDevisAutrePDF(devis = {}) {
@@ -20,7 +20,7 @@ export function buildDevisAutrePDF(devis = {}) {
     doc.on("end", () => resolve(Buffer.concat(chunks)));
 
     /* ===== Style tokens ===== */
-    const PRIMARY = "#0B2A55";
+    const PRIMARY = "#002147";           // bleu marine MTR
     const LIGHT   = "#F5F7FB";
     const BORDER  = "#D5D9E4";
     const TXT     = "#111";
@@ -123,32 +123,61 @@ export function buildDevisAutrePDF(devis = {}) {
     };
 
     /* ===== En-tête (logo + titres) ===== */
+    // Réglages indépendants (comme demandé)
+    const SAFE_TOP = 10;
+    const HEADER_SHIFT_UP = 28;           // bouge tout le bandeau si besoin
+    const HEADER_Y = Math.max(SAFE_TOP, TOP - HEADER_SHIFT_UP);
+
+    const TITLE_OFFSET_DOWN = 36;         // ↓ titre plus bas
+    const LOGO_EXTRA_UP = 18;             // ↑ logo plus haut
+
     const logoPath = tryImage(["assets/logo.png"]);
-    if (logoPath) doc.image(logoPath, LEFT, y - 6, { fit: [180, 85] });
+    const logoW = 210, logoHMax = 100;
+    const logoY = Math.max(SAFE_TOP - 2, HEADER_Y - 12 - LOGO_EXTRA_UP);
+    if (logoPath) doc.image(logoPath, LEFT, logoY, { fit: [logoW, logoHMax] });
 
+    // Titres en bleu marine
+    const titleTop = HEADER_Y + TITLE_OFFSET_DOWN;
     doc
-      .fillColor(TXT)
+      .fillColor(PRIMARY)
       .font("Helvetica-Bold")
-      .fontSize(17)
-      .text("Demande de devis", LEFT, y + 4, { width: INNER_W, align: "center" });
-    doc
-      .font("Helvetica-Bold")
-      .fontSize(19)
-      .text(PRODUCT_LABEL, LEFT, y + 24, { width: INNER_W, align: "center" });
+      .fontSize(20)
+      .text("Demande de devis", LEFT, titleTop, { width: INNER_W, align: "center" });
 
-    const metaTop = y + 24 + doc.heightOfString(PRODUCT_LABEL, { width: INNER_W }) + 6;
-    const metaNum = numero ? `N° : ${numero}` : _id ? `ID : ${_id}` : "";
+    const h1 = doc.heightOfString("Demande de devis", { width: INNER_W });
+    const subTop = titleTop + h1 + 4;
     doc
-      .font("Helvetica")
-      .fontSize(10)
-      .fillColor(TXT)
-      .text(metaNum, LEFT, metaTop, { width: INNER_W, align: "right" })
-      .text(
-        `Date : ${dayjs(createdAt || Date.now()).format("DD/MM/YYYY HH:mm")}`,
-        LEFT,
-        metaTop + 14,
-        { width: INNER_W, align: "right" }
-      );
+      .font("Helvetica-Bold")
+      .fontSize(22)
+      .fillColor(PRIMARY)
+      .text(PRODUCT_LABEL, LEFT, subTop, { width: INNER_W, align: "center" });
+
+    // Méta à droite — valeur en GRAS, libellé normal
+    const subH = doc.heightOfString(PRODUCT_LABEL, { width: INNER_W });
+    const metaTop = subTop + subH + 6;
+
+    const metaFontSize = 10;
+    const numLabel = "N° : ";
+    const numValue = numero ? String(numero) : (_id ? String(_id) : "");
+    doc.font("Helvetica-Bold").fontSize(metaFontSize);
+    const numValW = doc.widthOfString(numValue);
+    const numValX = RIGHT - numValW;
+    doc.text(numValue, numValX, metaTop, { lineBreak: false });
+
+    doc.font("Helvetica").fontSize(metaFontSize);
+    const numLblW = doc.widthOfString(numLabel);
+    doc.text(numLabel, numValX - numLblW, metaTop, { lineBreak: false });
+
+    const dateLabel = "Date : ";
+    const dateValue = dayjs(createdAt || Date.now()).format("DD/MM/YYYY HH:mm");
+    doc.font("Helvetica-Bold").fontSize(metaFontSize);
+    const dateValW = doc.widthOfString(dateValue);
+    const dateValX = RIGHT - dateValW;
+    doc.text(dateValue, dateValX, metaTop + 14, { lineBreak: false });
+
+    doc.font("Helvetica").fontSize(metaFontSize);
+    const dateLblW = doc.widthOfString(dateLabel);
+    doc.text(dateLabel, dateValX - dateLblW, metaTop + 14, { lineBreak: false });
 
     rule(metaTop + 24);
     y = metaTop + 34;
@@ -221,7 +250,6 @@ export function buildDevisAutrePDF(devis = {}) {
     pushIf("Dimensions principales", spec.dimensions || spec.dim || spec.dimension);
     pushIf("Quantité", spec.quantite ?? quantiteDevis);
     pushIf("Matière", spec.matiere);
-    // Si jamais vous voulez montrer explicitement "Matière (autre)" en plus :
     if (hasText(spec.matiereAutre)) pushIf("Matière (autre)", spec.matiereAutre);
 
     // Passage en lignes de 2 colonnes
