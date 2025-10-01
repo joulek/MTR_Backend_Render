@@ -39,18 +39,12 @@ app.set("trust proxy", 1);
 const ALLOWED_ORIGINS = [
   "https://mtr-frontend-render.onrender.com",
   "http://localhost:3000",
-  ...(process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean) : []),
 ];
 app.use(
   cors({
     origin: (origin, cb) => {
-      // autoriser requêtes serveur-à-serveur sans origin
-      if (!origin) return cb(null, true);
-      if (ALLOWED_ORIGINS.includes(origin)) {
-        // refléter exactement l'origine (et non "*") pour autoriser les cookies
-        return cb(null, origin);
-      }
-      return cb(new Error(`CORS blocked for origin ${origin}`));
+      if (!origin) return cb(null, true); // outils comme curl/postman
+      return cb(null, ALLOWED_ORIGINS.includes(origin));
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -115,7 +109,7 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 4000;
 const server = app.listen(PORT, () =>
-  console.log(`🚀 Server running on http://localhost:${PORT}`)
+  console.log(`🚀 Server running on http://localhost:${PORT} `)
 );
 
 const shutdown = async () => {
@@ -127,3 +121,4 @@ process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
 export default app;
+mtr-frontend-render.onrender.com
