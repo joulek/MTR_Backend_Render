@@ -267,19 +267,25 @@ router.get("/devis/torsion/:id/pdf", auth, only("admin"), async (req, res) => {
     const buf = toBuffer(devis?.demandePdf?.data);
     if (!buf?.length) return res.status(404).json({ success: false, message: "PDF non trouvé" });
 
-    const filename = `devis-torsion-${devis.numero || req.params.id}.pdf`;
+    // ⬇️ اسم الملف فقط
+    const numero = devis.numero || req.params.id;
+    const filename = `devis-torsion-${numero}.pdf`;
+
     res.setHeader("Content-Type", devis.demandePdf.contentType || "application/pdf");
     res.setHeader("Content-Length", buf.length);
-    // filename normal + filename* UTF-8 pour une compat max
-    res.setHeader("Content-Disposition",
+    // 👇 هاذي تفرض اسم الملف وقت التحميل
+    res.setHeader(
+      "Content-Disposition",
       `inline; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`
     );
+
     res.end(buf);
   } catch (e) {
     console.error("GET /api/admin/devis/torsion/:id/pdf error:", e);
     res.status(500).json({ success: false, message: "Erreur serveur" });
   }
 });
+
 
 
 router.get("/devis/torsion/:id/document/:index", auth, only("admin"), async (req, res) => {
