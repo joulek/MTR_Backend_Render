@@ -11,6 +11,26 @@ import {
 
 } from "../controllers/product.controller.js";
 const router = Router();
+// routes/product.routes.js (مثال)
+import multer from "multer";
+import path from "path";
+
+const storage = multer.diskStorage({
+  destination: (_, __, cb) => cb(null, path.resolve(process.cwd(), "uploads")),
+  filename: (_, file, cb) => {
+    // اسم نظيف + امتداد
+    const ext = path.extname(file.originalname || "").toLowerCase() || ".bin";
+    const base = path.basename(file.originalname || "file", ext)
+                  .replace(/[^\w.-]+/g, "_");
+    cb(null, `${Date.now()}-${base}${ext}`);
+  },
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024, files: 10 },
+});
+
 
 router.get("/", getProducts);
 router.get("/by-category/:categoryId", getProductsByCategory); // ⬅️ NEW
