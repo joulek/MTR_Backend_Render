@@ -1,12 +1,17 @@
 import Devis from "../models/Devis.js";
 import mongoose from "mongoose";
-const ORIGIN = process.env.PUBLIC_BACKEND_URL || `http://localhost:${process.env.PORT || 4000}`;
+const ORIGIN =
+  process.env.PUBLIC_BACKEND_URL ||
+  `http://localhost:${process.env.PORT || 4000}`;
 
 // controllers/devis.client.controller.js
 
-
 const toObjectId = (v) => {
-  try { return new mongoose.Types.ObjectId(String(v)); } catch { return null; }
+  try {
+    return new mongoose.Types.ObjectId(String(v));
+  } catch {
+    return null;
+  }
 };
 
 const esc = (s = "") => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -28,20 +33,24 @@ export async function listMyDevis(req, res) {
   try {
     const userId = req.user?._id || req.user?.id || req.query.clientId;
     const oid = toObjectId(userId);
-    if (!oid) return res.status(401).json({ success: false, message: "Non autorisé" });
+    if (!oid)
+      return res.status(401).json({ success: false, message: "Non autorisé" });
 
-    const page  = Math.max(1, parseInt(req.query.page ?? "1", 10));
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit ?? "20", 10)));
-    const skip  = (page - 1) * limit;
-    const q     = (req.query.q || "").toString().trim();
-    const from  = req.query.from ? new Date(req.query.from) : null;
-    const to    = req.query.to   ? new Date(req.query.to)   : null;
+    const page = Math.max(1, parseInt(req.query.page ?? "1", 10));
+    const limit = Math.min(
+      100,
+      Math.max(1, parseInt(req.query.limit ?? "20", 10))
+    );
+    const skip = (page - 1) * limit;
+    const q = (req.query.q || "").toString().trim();
+    const from = req.query.from ? new Date(req.query.from) : null;
+    const to = req.query.to ? new Date(req.query.to) : null;
 
     const match = { "client.id": oid };
     if (from || to) {
       match.createdAt = {};
       if (from && !Number.isNaN(from.getTime())) match.createdAt.$gte = from;
-      if (to && !Number.isNaN(to.getTime()))     match.createdAt.$lte = to;
+      if (to && !Number.isNaN(to.getTime())) match.createdAt.$lte = to;
       if (!Object.keys(match.createdAt).length) delete match.createdAt;
     }
     if (q) {
@@ -59,25 +68,42 @@ export async function listMyDevis(req, res) {
 
     const pipeline = [
       { $match: match },
+      // داخل pipeline: بدّل الـ$project (الخطوة 9) هكة
       {
         $project: {
-          _id: 1,                                        // ✅ لازم
-          numero: 1,
-          createdAt: 1,
-          devisPdf: { $concat: [ORIGIN, "/files/devis/", "$numero", ".pdf"] },
-          allDemNums: {
-            $setUnion: [
-              { $ifNull: ["$meta.demandes.numero", []] },
-              [
-                { $ifNull: ["$demandeNumero", null] },
-                { $ifNull: ["$meta.demandeNumero", null] }
-              ],
-              { $ifNull: ["$items.demandeNumero", []] }
-            ]
+          _id: 1,
+          demandeNumero: "$_filled.numero",
+          type: "$_filled.type",
+          client: "$client.nom",
+          date: "$createdAt",
+
+          // PDF DDV فقط
+          ddvPdf: {
+            $cond: [
+              {
+                $and: [
+                  { $ne: ["$_filled.type", null] },
+                  { $ne: ["$_filled.type", ""] },
+                ],
+              },
+              {
+                $concat: [
+                  ORIGIN,
+                  "/api/devis/",
+                  "$_filled.type",
+                  "/",
+                  { $toString: "$_id" },
+                  "/pdf",
+                ],
+              },
+              null,
+            ],
           },
-          allTypes: { $setUnion: [ { $ifNull: ["$meta.demandes.type", []] } ] },
-          totalTTC: "$totaux.mttc"
-        }
+
+          // لا نرجّع devisPdf
+          documents: "$documents",
+          attachments: "$attachments",
+        },
       },
       {
         $project: {
@@ -88,36 +114,75 @@ export async function listMyDevis(req, res) {
           totalTTC: 1,
           demandeNumeros: {
             $setDifference: [
-              { $filter: { input: "$allDemNums", as: "n", cond: { $and: [ { $ne: ["$$n", null] }, { $ne: ["$$n", ""] } ] } } },
-              [null, ""]
-            ]
+              {
+                $filter: {
+                  input: "$allDemNums",
+                  as: "n",
+                  cond: {
+                    $and: [{ $ne: ["$$n", null] }, { $ne: ["$$n", ""] }],
+                  },
+                },
+              },
+              [null, ""],
+            ],
           },
           types: {
             $setDifference: [
-              { $filter: { input: "$allTypes", as: "t", cond: { $and: [ { $ne: ["$$t", null] }, { $ne: ["$$t", ""] } ] } } },
-              [null, ""]
-            ]
-          }
-        }
+              {
+                $filter: {
+                  input: "$allTypes",
+                  as: "t",
+                  cond: {
+                    $and: [{ $ne: ["$$t", null] }, { $ne: ["$$t", ""] }],
+                  },
+                },
+              },
+              [null, ""],
+            ],
+          },
+        },
       },
       { $sort: { createdAt: -1 } },
-      { $facet: { meta:  [{ $count: "total" }], items: [{ $skip: skip }, { $limit: limit }] } },
-      { $project: { total: { $ifNull: [ { $arrayElemAt: ["$meta.total", 0] }, 0 ] }, items: 1 } }
+      {
+        $facet: {
+          meta: [{ $count: "total" }],
+          items: [{ $skip: skip }, { $limit: limit }],
+        },
+      },
+      {
+        $project: {
+          total: { $ifNull: [{ $arrayElemAt: ["$meta.total", 0] }, 0] },
+          items: 1,
+        },
+      },
     ];
 
-    const [agg = { total: 0, items: [] }] = await Devis.aggregate(pipeline).allowDiskUse(true);
+    const [agg = { total: 0, items: [] }] = await Devis.aggregate(
+      pipeline
+    ).allowDiskUse(true);
 
-    const items = (agg.items || []).map((d) => ({
-      devisId: d._id?.toString(),                        // ✅ هنا
-      devisNumero: d.numero,
-      devisPdf: d.devisPdf,
-      demandeNumeros: d.demandeNumeros || [],
-      types: d.types || [],
-      totalTTC: d.totalTTC ?? 0,
-      date: d.createdAt
+    // بعد aggregate (post-map): نحّي devisPdf
+    const items = (agg?.items || []).map((d) => ({
+      _id: d._id,
+      demandeNumero: d.demandeNumero,
+      type: d.type,
+      client: d.client || "",
+      date: d.date,
+      ddvPdf: d.ddvPdf, // ممكن null
+      // devisPdf: نحيناه
+      documents: d.documents || [],
+      attachments: Array.isArray(d.documents)
+        ? d.documents.length
+        : Number(d.attachments) || 0,
     }));
 
-    return res.json({ success: true, page, limit, total: agg.total || 0, items });
+    return res.json({
+      success: true,
+      page,
+      limit,
+      total: agg.total || 0,
+      items,
+    });
   } catch (e) {
     console.error("listMyDevis error:", e);
     return res.status(500).json({ success: false, message: "Erreur serveur" });
@@ -162,12 +227,15 @@ const ORIGIN =
  */
 export async function listDemandesFlat(req, res) {
   try {
-    const page  = Math.max(1, parseInt(req.query.page ?? "1", 10));
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit ?? "20", 10)));
-    const skip  = (page - 1) * limit;
+    const page = Math.max(1, parseInt(req.query.page ?? "1", 10));
+    const limit = Math.min(
+      100,
+      Math.max(1, parseInt(req.query.limit ?? "20", 10))
+    );
+    const skip = (page - 1) * limit;
 
     const typeQ = String(req.query.type || "all").toLowerCase();
-    const q     = String(req.query.q || "").trim();
+    const q = String(req.query.q || "").trim();
 
     /* ===== MATCH ===== */
     const match = {};
@@ -183,8 +251,8 @@ export async function listDemandesFlat(req, res) {
       const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
       match.$or = [
         ...(match.$or || []),
-        { numero: rx },                      // DV...
-        { "meta.demandes.numero": rx },      // DDV...
+        { numero: rx }, // DV...
+        { "meta.demandes.numero": rx }, // DDV...
         { demandeNumero: rx },
         { "meta.demandeNumero": rx },
         { "client.nom": rx },
@@ -203,24 +271,32 @@ export async function listDemandesFlat(req, res) {
               "$meta.demandes",
               {
                 $map: {
-                  input: { $objectToArray: { $ifNull: ["$meta.demandes", {}] } },
+                  input: {
+                    $objectToArray: { $ifNull: ["$meta.demandes", {}] },
+                  },
                   as: "kv",
                   in: "$$kv.v",
                 },
               },
             ],
-          }
-        }
+          },
+        },
       },
 
       /* 2) Legacy -> array */
       {
         $addFields: {
           _legacy: [
-            { numero: { $ifNull: ["$demandeNumero", null] }, type: { $ifNull: ["$typeDemande", "$meta.typeDemande"] } },
-            { numero: { $ifNull: ["$meta.demandeNumero", null] }, type: { $ifNull: ["$meta.typeDemande", null] } },
-          ]
-        }
+            {
+              numero: { $ifNull: ["$demandeNumero", null] },
+              type: { $ifNull: ["$typeDemande", "$meta.typeDemande"] },
+            },
+            {
+              numero: { $ifNull: ["$meta.demandeNumero", null] },
+              type: { $ifNull: ["$meta.typeDemande", null] },
+            },
+          ],
+        },
       },
 
       /* 3) Fusion + nettoyage */
@@ -228,18 +304,23 @@ export async function listDemandesFlat(req, res) {
         $addFields: {
           _all: {
             $filter: {
-              input: { $setUnion: [ { $ifNull: ["$_dArr", []] }, { $ifNull: ["$_legacy", []] } ] },
+              input: {
+                $setUnion: [
+                  { $ifNull: ["$_dArr", []] },
+                  { $ifNull: ["$_legacy", []] },
+                ],
+              },
               as: "d",
               cond: {
                 $and: [
                   { $ne: ["$$d", null] },
-                  { $ne: [ { $ifNull: ["$$d.numero", null] }, null ] },
-                  { $ne: [ { $ifNull: ["$$d.numero", ""] }, "" ] },
-                ]
-              }
-            }
-          }
-        }
+                  { $ne: [{ $ifNull: ["$$d.numero", null] }, null] },
+                  { $ne: [{ $ifNull: ["$$d.numero", ""] }, ""] },
+                ],
+              },
+            },
+          },
+        },
       },
 
       /* 4) Normaliser -> {numero,type} + lowercase type */
@@ -251,11 +332,11 @@ export async function listDemandesFlat(req, res) {
               as: "d",
               in: {
                 numero: "$$d.numero",
-                type: { $toLower: { $ifNull: ["$$d.type", null] } }
-              }
-            }
-          }
-        }
+                type: { $toLower: { $ifNull: ["$$d.type", null] } },
+              },
+            },
+          },
+        },
       },
 
       /* 5) Dédup dans الوثيقة نفسها */
@@ -269,13 +350,17 @@ export async function listDemandesFlat(req, res) {
                 $cond: [
                   { $in: ["$$this.numero", "$$value.nums"] },
                   "$$value",
-                  { nums: { $concatArrays: ["$$value.nums", ["$$this.numero"]] },
-                    out: { $concatArrays: ["$$value.out", ["$$this"]] } }
-                ]
-              }
-            }
-          }
-        }
+                  {
+                    nums: {
+                      $concatArrays: ["$$value.nums", ["$$this.numero"]],
+                    },
+                    out: { $concatArrays: ["$$value.out", ["$$this"]] },
+                  },
+                ],
+              },
+            },
+          },
+        },
       },
       { $addFields: { _uniq: "$_uniqAgg.out" } },
 
@@ -288,9 +373,9 @@ export async function listDemandesFlat(req, res) {
               [{ $toLower: { $ifNull: ["$type", null] } }],
               [{ $toLower: { $ifNull: ["$typeDemande", null] } }],
               [{ $toLower: { $ifNull: ["$meta.typeDemande", null] } }],
-            ]
-          }
-        }
+            ],
+          },
+        },
       },
       {
         $addFields: {
@@ -298,12 +383,18 @@ export async function listDemandesFlat(req, res) {
             $filter: {
               input: "$_typesCand",
               as: "t",
-              cond: { $and: [{ $ne: ["$$t", null] }, { $ne: ["$$t", ""] }] }
-            }
-          }
-        }
+              cond: { $and: [{ $ne: ["$$t", null] }, { $ne: ["$$t", ""] }] },
+            },
+          },
+        },
       },
-      { $addFields: { primaryType: { $ifNull: [ { $arrayElemAt: ["$_typesClean", 0] }, null ] } } },
+      {
+        $addFields: {
+          primaryType: {
+            $ifNull: [{ $arrayElemAt: ["$_typesClean", 0] }, null],
+          },
+        },
+      },
 
       /* 7) عَبّي type الناقص */
       {
@@ -314,11 +405,11 @@ export async function listDemandesFlat(req, res) {
               as: "d",
               in: {
                 numero: "$$d.numero",
-                type: { $toLower: { $ifNull: ["$$d.type", "$primaryType"] } }
-              }
-            }
-          }
-        }
+                type: { $toLower: { $ifNull: ["$$d.type", "$primaryType"] } },
+              },
+            },
+          },
+        },
       },
 
       /* 8) Unwind => chaque document = Demande واحدة */
@@ -327,7 +418,7 @@ export async function listDemandesFlat(req, res) {
       /* 9) Projection سطر واحد (Demande) */
       {
         $project: {
-          _id: 1,                  // id وثيقة Devis المجمّعة (يخدم مع /api/devis/:type/:id/pdf)
+          _id: 1, // id وثيقة Devis المجمّعة (يخدم مع /api/devis/:type/:id/pdf)
           demandeNumero: "$_filled.numero",
           type: "$_filled.type",
           client: "$client.nom",
@@ -336,19 +427,33 @@ export async function listDemandesFlat(req, res) {
           // PDF DDV (كيما routes متاعك): نعمرها كان النوع موجود
           ddvPdf: {
             $cond: [
-              { $and: [ { $ne: ["$_filled.type", null] }, { $ne: ["$_filled.type", ""] } ] },
-              { $concat: [ ORIGIN, "/api/devis/", "$_filled.type", "/", { $toString: "$_id" }, "/pdf" ] },
-              null
-            ]
+              {
+                $and: [
+                  { $ne: ["$_filled.type", null] },
+                  { $ne: ["$_filled.type", ""] },
+                ],
+              },
+              {
+                $concat: [
+                  ORIGIN,
+                  "/api/devis/",
+                  "$_filled.type",
+                  "/",
+                  { $toString: "$_id" },
+                  "/pdf",
+                ],
+              },
+              null,
+            ],
           },
 
           // PDF fichiers devis (DVxxxx.pdf)
-          devisPdf: { $concat: [ ORIGIN, "/files/devis/", "$numero", ".pdf" ] },
+          devisPdf: { $concat: [ORIGIN, "/files/devis/", "$numero", ".pdf"] },
 
           // Attachments/Docs
           documents: "$documents",
           attachments: "$attachments",
-        }
+        },
       },
 
       /* 10) ترتيب + Pagination */
@@ -358,35 +463,41 @@ export async function listDemandesFlat(req, res) {
         $facet: {
           meta: [{ $count: "total" }],
           items: [{ $skip: skip }, { $limit: limit }],
-        }
+        },
       },
       {
         $project: {
           total: { $ifNull: [{ $arrayElemAt: ["$meta.total", 0] }, 0] },
-          items: 1
-        }
-      }
+          items: 1,
+        },
+      },
     ];
 
     const [agg] = await Devis.aggregate(pipeline).allowDiskUse(true);
 
     // POST-map صغير: عدّ الملفات
-    const items = (agg?.items || []).map(d => ({
+    const items = (agg?.items || []).map((d) => ({
       _id: d._id,
       demandeNumero: d.demandeNumero,
       type: d.type,
       client: d.client || "",
       date: d.date,
-      ddvPdf: d.ddvPdf,            // قد يكون null (نخبيه في الفرونت)
+      ddvPdf: d.ddvPdf, // قد يكون null (نخبيه في الفرونت)
       devisPdf: d.devisPdf,
-      attachments: Array.isArray(d.documents) ? d.documents.length : (Number(d.attachments) || 0),
+      attachments: Array.isArray(d.documents)
+        ? d.documents.length
+        : Number(d.attachments) || 0,
     }));
 
-    return res.json({ success: true, page, limit, total: agg?.total || 0, items });
+    return res.json({
+      success: true,
+      page,
+      limit,
+      total: agg?.total || 0,
+      items,
+    });
   } catch (e) {
     console.error("listDemandesFlat error:", e);
     return res.status(500).json({ success: false, message: "Erreur serveur" });
   }
 }
-
-
