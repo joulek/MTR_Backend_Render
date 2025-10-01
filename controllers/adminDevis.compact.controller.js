@@ -24,6 +24,10 @@ const esc = (s = "") => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  */
 // controllers/devis.client.controller.js
 
+
+// ⚠️ Utilise l'URL publique si dispo, sinon on déduit dynamiquement
+const ORIGIN_ENV = process.env.PUBLIC_BACKEND_URL?.replace(/\/$/, "");
+
 export async function listMyDevis(req, res) {
   try {
     const userId = req.user?._id || req.user?.id || req.query.clientId;
@@ -57,14 +61,20 @@ export async function listMyDevis(req, res) {
       ];
     }
 
+    // ✅ Origin robuste: env > header origin > protocole + host
+    const reqOrigin =
+      ORIGIN_ENV ||
+      req.headers.origin ||
+      `${req.protocol}://${req.get("host")}`;
+
     const pipeline = [
       { $match: match },
       {
         $project: {
-          _id: 1,                                        // ✅ لازم
+          _id: 1,
           numero: 1,
           createdAt: 1,
-          devisPdf: { $concat: [ORIGIN, "/files/devis/", "$numero", ".pdf"] },
+          devisPdf: { $concat: [reqOrigin, "/files/devis/", "$numero", ".pdf"] },
           allDemNums: {
             $setUnion: [
               { $ifNull: ["$meta.demandes.numero", []] },
@@ -88,13 +98,25 @@ export async function listMyDevis(req, res) {
           totalTTC: 1,
           demandeNumeros: {
             $setDifference: [
-              { $filter: { input: "$allDemNums", as: "n", cond: { $and: [ { $ne: ["$$n", null] }, { $ne: ["$$n", ""] } ] } } },
+              {
+                $filter: {
+                  input: "$allDemNums",
+                  as: "n",
+                  cond: { $and: [ { $ne: ["$$n", null] }, { $ne: ["$$n", ""] } ] }
+                }
+              },
               [null, ""]
             ]
           },
           types: {
             $setDifference: [
-              { $filter: { input: "$allTypes", as: "t", cond: { $and: [ { $ne: ["$$t", null] }, { $ne: ["$$t", ""] } ] } } },
+              {
+                $filter: {
+                  input: "$allTypes",
+                  as: "t",
+                  cond: { $and: [ { $ne: ["$$t", null] }, { $ne: ["$$t", ""] } ] }
+                }
+              },
               [null, ""]
             ]
           }
@@ -108,7 +130,7 @@ export async function listMyDevis(req, res) {
     const [agg = { total: 0, items: [] }] = await Devis.aggregate(pipeline).allowDiskUse(true);
 
     const items = (agg.items || []).map((d) => ({
-      devisId: d._id?.toString(),                        // ✅ هنا
+      devisId: d._id?.toString(),
       devisNumero: d.numero,
       devisPdf: d.devisPdf,
       demandeNumeros: d.demandeNumeros || [],
@@ -123,6 +145,7 @@ export async function listMyDevis(req, res) {
     return res.status(500).json({ success: false, message: "Erreur serveur" });
   }
 }
+
 export async function listDevisCompact(req, res) {
   try {
     const page  = Math.max(1, parseInt(req.query.page ?? "1", 10));

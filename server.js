@@ -97,6 +97,15 @@ app.use("/api/dashboard", dashboardRoutes);
 
 /* 404 */
 app.use((req, res) => res.status(404).json({ error: "Route not found" }));
+app.use("/files", express.static(path.join(process.cwd(), "files"), {
+  setHeaders(res, filePath) {
+    if (filePath.endsWith(".pdf")) {
+      res.setHeader("Content-Type", "application/pdf");
+      // utile pour previews cross-origin
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    }
+  }
+}));
 
 /* Global error handler */
 app.use((err, req, res, next) => {
@@ -110,6 +119,7 @@ const PORT = process.env.PORT || 4000;
 const server = app.listen(PORT, () =>
   console.log(`🚀 Server running on http://localhost:${PORT}`)
 );
+
 
 const shutdown = async () => {
   console.log("\n⏹️  Shutting down...");
