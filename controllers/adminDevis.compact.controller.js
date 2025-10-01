@@ -128,21 +128,31 @@ export async function listMyDevis(req, res) {
  * GET /api/admin/devis/compact?type=all|compression|traction|torsion|fil|grille|autre&q=...&page=1&limit=20
  * يرجّع صفوف جاهزة للقائمة (devisNumero, demandeNumeros, types, client, date, pdf)
  */
+/**
+ * GET /api/admin/devis/compact
+ * Query:
+ *  - q     : recherche (devis.numero, meta.demandes.numero, demandeNumero, client.nom)
+ *  - type  : "all" | "traction" | "torsion" | ...  (filtre côté serveur si présent)
+ *  - page  : 1..N
+ *  - limit : 1..100
+ */
 export async function listDevisCompact(req, res) {
   try {
     const page  = Math.max(1, parseInt(req.query.page ?? "1", 10));
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit ?? "20", 10)));
     const skip  = (page - 1) * limit;
-    const type  = (req.query.type || "all").toString().toLowerCase();
-    const q     = (req.query.q || "").toString().trim();
 
+    const type  = String(req.query.type || "all").toLowerCase();
+    const q     = String(req.query.q || "").trim();
+
+    /* ====== MATCH (filtrage initial) ====== */
     const match = {};
     if (type && type !== "all") {
-      // support: tableau de sous-docs, map d'objets, anciens champs
+      // Filtre par type sur toutes les variantes possibles
       match.$or = [
         { "meta.demandes.type": type },
         { "meta.typeDemande": type },
-        { "typeDemande": type }
+        { "typeDemande": type },
       ];
     }
     if (q) {
@@ -160,7 +170,7 @@ export async function listDevisCompact(req, res) {
     const pipeline = [
       { $match: match },
 
-      // ===== 1) Normaliser meta.demandes en tableau =====
+      /* ====== 1) Normaliser meta.demandes en tableau ====== */
       {
         $addFields: {
           _demandesArray: {
@@ -168,100 +178,131 @@ export async function listDevisCompact(req, res) {
               { $isArray: "$meta.demandes" },
               "$meta.demandes",
               {
-                // si c'est un objet/map -> on récupère les valeurs
+                // Si meta.demandes est un objet (ancienne forme), on en extrait les valeurs
                 $map: {
                   input: { $objectToArray: { $ifNull: ["$meta.demandes", {}] } },
                   as: "kv",
-                  in: "$$kv.v"
-                }
-              }
-            ]
-          }
-        }
+                  in: "$$kv.v",
+                },
+              },
+            ],
+          },
+        },
       },
 
-      // ===== 2) Extraire numeros/types depuis le tableau normalisé =====
+      /* ====== 2) Construire un tableau fusionné de demandes (legacy + nouveau) ====== */
       {
         $addFields: {
-          _demNumsFromMeta: {
-            $map: { input: "$_demandesArray", as: "d", in: "$$d.numero" }
+          _legacyDemandes: [
+            {
+              numero: { $ifNull: ["$demandeNumero", null] },
+              type:   { $ifNull: ["$typeDemande", "$meta.typeDemande"] },
+            },
+            {
+              numero: { $ifNull: ["$meta.demandeNumero", null] },
+              type:   { $ifNull: ["$meta.typeDemande", null] },
+            },
+          ],
+        },
+      },
+      {
+        $addFields: {
+          _allDemandesRaw: {
+            $setUnion: [
+              { $ifNull: ["$_demandesArray", []] },
+              { $ifNull: ["$_legacyDemandes", []] },
+            ],
           },
-          _typesFromMeta: {
-            $map: { input: "$_demandesArray", as: "d", in: "$$d.type" }
-          }
-        }
+        },
       },
 
-      // ===== 3) Construire les champs compactés + URL PDF =====
+      /* ====== 3) Nettoyer: enlever les entrées sans numero ====== */
+      {
+        $addFields: {
+          _allDemandes: {
+            $filter: {
+              input: "$_allDemandesRaw",
+              as: "d",
+              cond: {
+                $and: [
+                  { $ne: ["$$d", null] },
+                  { $ne: ["$$d.numero", null] },
+                  { $ne: ["$$d.numero", ""] },
+                ],
+              },
+            },
+          },
+        },
+      },
+
+      /* ====== 4) Dérivés: listes "demandesNumeros" et "types" ====== */
+      {
+        $addFields: {
+          _demandeNumeros: {
+            $setUnion: [
+              {
+                $map: {
+                  input: "$_allDemandes",
+                  as: "d",
+                  in: "$$d.numero",
+                },
+              },
+              [], // pour forcer un tableau
+            ],
+          },
+          _types: {
+            $setUnion: [
+              {
+                $map: {
+                  input: "$_allDemandes",
+                  as: "d",
+                  in: { $ifNull: ["$$d.type", ""] },
+                },
+              },
+              [],
+            ],
+          },
+        },
+      },
+
+      /* ====== 5) Projection compacte ====== */
       {
         $project: {
           numero: 1,
           createdAt: 1,
           clientNom: "$client.nom",
-
-          // ORIGIN doit être une constante de ton serveur, ici supposé global
           devisPdf: { $concat: [ORIGIN, "/files/devis/", "$numero", ".pdf"] },
 
-          // fusion avec les anciens champs (demandeNumero/typeDemande)
-          allDemNums: {
-            $setUnion: [
-              { $ifNull: ["$_demNumsFromMeta", []] },
-              [
-                { $ifNull: ["$demandeNumero", null] },
-                { $ifNull: ["$meta.demandeNumero", null] }
-              ]
-            ]
-          },
-          allTypes: {
-            $setUnion: [
-              { $ifNull: ["$_typesFromMeta", []] },
-              [
-                { $ifNull: ["$typeDemande", null] },
-                { $ifNull: ["$meta.typeDemande", null] }
-              ]
-            ]
-          }
-        }
-      },
+          // La liste complète des demandes (numero + type)
+          demandes: "$_allDemandes",
 
-      // ===== 4) Nettoyer null / "" =====
-      {
-        $project: {
-          numero: 1,
-          createdAt: 1,
-          clientNom: 1,
-          devisPdf: 1,
-          demandeNumeros: {
-            $filter: {
-              input: "$allDemNums",
-              as: "n",
-              cond: { $and: [ { $ne: ["$$n", null] }, { $ne: ["$$n", ""] } ] }
-            }
-          },
+          // Dérivés utiles
+          demandeNumeros: "$_demandeNumeros",
           types: {
             $filter: {
-              input: "$allTypes",
+              input: "$_types",
               as: "t",
-              cond: { $and: [ { $ne: ["$$t", null] }, { $ne: ["$$t", ""] } ] }
-            }
-          }
-        }
+              cond: { $and: [{ $ne: ["$$t", null] }, { $ne: ["$$t", ""] }] },
+            },
+          },
+        },
       },
 
       { $sort: { createdAt: -1 } },
 
+      /* ====== 6) Pagination ====== */
       {
         $facet: {
-          meta:  [{ $count: "total" }],
-          items: [{ $skip: skip }, { $limit: limit }]
-        }
+          meta: [{ $count: "total" }],
+          items: [{ $skip: skip }, { $limit: limit }],
+        },
       },
       {
         $project: {
-          total: { $ifNull: [ { $arrayElemAt: ["$meta.total", 0] }, 0 ] },
-          items: 1
-        }
-      }
+          total: { $ifNull: [{ $arrayElemAt: ["$meta.total", 0] }, 0] },
+          items: 1,
+        },
+      },
     ];
 
     const [agg] = await Devis.aggregate(pipeline).allowDiskUse(true);
@@ -269,10 +310,15 @@ export async function listDevisCompact(req, res) {
     const items = (agg?.items || []).map((d) => ({
       devisNumero: d.numero,
       devisPdf: d.devisPdf,
+      client: d.clientNom || "",
+      date: d.createdAt,
+
+      // ✅ Toutes les demandes liées avec type
+      demandes: d.demandes || [], // [{ numero, type }, ...]
+
+      // champs pratiques si tu veux rapidement afficher
       demandeNumeros: d.demandeNumeros || [],
       types: d.types || [],
-      client: d.clientNom || "",
-      date: d.createdAt
     }));
 
     return res.json({
@@ -280,11 +326,12 @@ export async function listDevisCompact(req, res) {
       page,
       limit,
       total: agg?.total || 0,
-      items
+      items,
     });
   } catch (e) {
     console.error("listDevisCompact error:", e);
     return res.status(500).json({ success: false, message: "Erreur serveur" });
   }
 }
+
 
