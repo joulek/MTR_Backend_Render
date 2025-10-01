@@ -10,7 +10,7 @@ import {
   getByDemandeAdmin,
   adminPdfByNumero,            // 👈 add this
 } from "../controllers/devis.controller.js";
-import { listDevisCompact ,listMyDevis} from "../controllers/adminDevis.compact.controller.js";
+import { listDemandesFlat ,listMyDevis} from "../controllers/adminDevis.compact.controller.js";
 
 const router = Router();
 
