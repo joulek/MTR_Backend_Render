@@ -57,8 +57,6 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 /* ✅ statiques */
-app.use("/uploads", express.static(path.resolve(process.cwd(), "uploads")));
-app.use("/files/devis", express.static(path.resolve(process.cwd(), "storage/devis")));
 
 /* ---------------------- MongoDB ---------------------- */
 const MONGO_URI = process.env.MONGODB_URI || "mongodb://localhost:27017/myapp_db";
@@ -96,16 +94,24 @@ app.use("/api/contact", contactRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 
 /* 404 */
-app.use((req, res) => res.status(404).json({ error: "Route not found" }));
+/* ✅ statiques (placer AVANT les routes 404) */
+app.use("/uploads", express.static(path.resolve(process.cwd(), "uploads")));
+app.use("/files/devis", express.static(path.resolve(process.cwd(), "storage/devis")));
 app.use("/files", express.static(path.join(process.cwd(), "files"), {
   setHeaders(res, filePath) {
     if (filePath.endsWith(".pdf")) {
       res.setHeader("Content-Type", "application/pdf");
-      // utile pour previews cross-origin
       res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
     }
   }
 }));
+
+/* ---------------------- Routes ---------------------- */
+// ... toutes tes routes API ...
+
+/* 404 - garder VRAIMENT en dernier */
+app.use((req, res) => res.status(404).json({ error: "Route not found" }));
+
 
 /* Global error handler */
 app.use((err, req, res, next) => {
