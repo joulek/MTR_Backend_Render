@@ -14,7 +14,7 @@ import { listDemandesFlat ,listMyDevis} from "../controllers/adminDevis.compact.
 
 const router = Router();
 
-router.get("/devis/list", /*authAdmin,*/ listDevisCompact);
+router.get("/devis/list", /*authAdmin,*/ listDemandesFlat);
 router.get("/client/devis", auth, listMyDevis);
 
 router.get("/client/by-demande/:demandeId", auth, getDevisByDemandeClient);
