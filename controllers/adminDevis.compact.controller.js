@@ -123,11 +123,6 @@ export async function listMyDevis(req, res) {
     return res.status(500).json({ success: false, message: "Erreur serveur" });
   }
 }
-
-/**
- * GET /api/admin/devis/compact?type=all|compression|traction|torsion|fil|grille|autre&q=...&page=1&limit=20
- * يرجّع صفوف جاهزة للقائمة (devisNumero, demandeNumeros, types, client, date, pdf)
- */
 export async function listDevisCompact(req, res) {
   try {
     const page  = Math.max(1, parseInt(req.query.page ?? "1", 10));
@@ -136,10 +131,9 @@ export async function listDevisCompact(req, res) {
     const type  = (req.query.type || "all").toString().toLowerCase();
     const q     = (req.query.q || "").toString().trim();
 
-    // مطابقة (match) باستعمال الفهارس اللي فوق
     const match = {};
     if (type && type !== "all") {
-      match["meta.demandes.type"] = type; // انت تخزّن type داخل linkSchema
+      match["meta.demandes.type"] = type;
     }
     if (q) {
       const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
@@ -154,16 +148,16 @@ export async function listDevisCompact(req, res) {
 
     const pipeline = [
       { $match: match },
-      // حضّر أرقام الـ demandes و الأنواع من meta + الحقل القديم
       {
         $project: {
+          _id: 1, // ✅ nécessaire pour la sélection côté front
           numero: 1,
           createdAt: 1,
           clientNom: "$client.nom",
           devisPdf: { $concat: [ORIGIN, "/files/devis/", "$numero", ".pdf"] },
           allDemNums: {
             $setUnion: [
-              { $ifNull: ["$meta.demandes.numero", []] }, // إذا كانت map objects، نعمل خطوة أخرى
+              { $ifNull: ["$meta.demandes.numero", []] },
               [
                 { $ifNull: ["$demandeNumero", null] },
                 { $ifNull: ["$meta.demandeNumero", null] }
@@ -180,6 +174,7 @@ export async function listDevisCompact(req, res) {
       },
       {
         $project: {
+          _id: 1,
           numero: 1,
           createdAt: 1,
           clientNom: 1,
@@ -216,6 +211,7 @@ export async function listDevisCompact(req, res) {
     const [agg] = await Devis.aggregate(pipeline).allowDiskUse(true);
 
     const items = (agg?.items || []).map((d) => ({
+      _id: d._id?.toString(),          // ✅ renvoyé pour la sélection
       devisNumero: d.numero,
       devisPdf: d.devisPdf,
       demandeNumeros: d.demandeNumeros || [],
@@ -224,15 +220,10 @@ export async function listDevisCompact(req, res) {
       date: d.createdAt
     }));
 
-    return res.json({
-      success: true,
-      page,
-      limit,
-      total: agg?.total || 0,
-      items
-    });
+    return res.json({ success: true, page, limit, total: agg?.total || 0, items });
   } catch (e) {
     console.error("listDevisCompact error:", e);
     return res.status(500).json({ success:false, message:"Erreur serveur" });
   }
 }
+

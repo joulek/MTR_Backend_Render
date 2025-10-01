@@ -39,12 +39,18 @@ app.set("trust proxy", 1);
 const ALLOWED_ORIGINS = [
   "https://mtr-frontend-render.onrender.com",
   "http://localhost:3000",
+  ...(process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean) : []),
 ];
 app.use(
   cors({
     origin: (origin, cb) => {
-      if (!origin) return cb(null, true); // outils comme curl/postman
-      return cb(null, ALLOWED_ORIGINS.includes(origin));
+      // autoriser requêtes serveur-à-serveur sans origin
+      if (!origin) return cb(null, true);
+      if (ALLOWED_ORIGINS.includes(origin)) {
+        // refléter exactement l'origine (et non "*") pour autoriser les cookies
+        return cb(null, origin);
+      }
+      return cb(new Error(`CORS blocked for origin ${origin}`));
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
