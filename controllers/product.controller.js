@@ -26,6 +26,32 @@ function safeUnlinkByPublicUrl(publicUrl) {
   } catch {}
 }
 
+/** Util : extrait le chemin relatif sous /uploads à partir d'une URL absolue ou relative */
+function extractUploadsRel(u) {
+  try {
+    if (!u) return null;
+    const str = String(u);
+    // Si URL absolue, on ne garde que le pathname
+    if (/^https?:\/\//i.test(str)) {
+      try {
+        const parsed = new URL(str);
+        // ex: /uploads/abc.png
+        return parsed.pathname.startsWith(UPLOAD_PUBLIC_URL + "/")
+          ? parsed.pathname.slice(UPLOAD_PUBLIC_URL.length + 1)
+          : parsed.pathname.replace(/^\/+/, "");
+      } catch {}
+    }
+    // Si déjà un chemin
+    const withoutLeading = str.replace(/^\/+/, "");
+    if (withoutLeading.startsWith("uploads/")) {
+      return withoutLeading.slice("uploads/".length);
+    }
+    return withoutLeading;
+  } catch {
+    return null;
+  }
+}
+
 /** CREATE PRODUCT */
 export const createProduct = async (req, res) => {
   try {
@@ -127,17 +153,25 @@ export const updateProduct = async (req, res) => {
       product.images = uploaded;
     } else {
       // Suppression ciblée demandée
-      if (removeImages.length) {
-        const toKeep = [];
-        for (const url of product.images) {
-          if (removeImages.includes(url)) {
-            safeUnlinkByPublicUrl(url);
-          } else {
-            toKeep.push(url);
-          }
+    if (removeImages.length) {
+      // Normaliser la liste demandée côté client en chemins relatifs sous /uploads
+      const removeSet = new Set(
+        removeImages
+          .map((u) => extractUploadsRel(u))
+          .filter(Boolean)
+      );
+
+      const toKeep = [];
+      for (const url of product.images) {
+        const rel = extractUploadsRel(url);
+        if (rel && removeSet.has(rel)) {
+          safeUnlinkByPublicUrl(url);
+        } else {
+          toKeep.push(url);
         }
-        product.images = toKeep;
       }
+      product.images = toKeep;
+    }
       // Ajout des nouvelles
       if (uploaded.length) product.images.push(...uploaded);
     }
