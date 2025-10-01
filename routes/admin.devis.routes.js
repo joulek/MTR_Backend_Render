@@ -258,6 +258,7 @@ router.get("/devis/torsion", auth, only("admin"), async (req, res) => {
   }
 });
 
+// routes/admin.devis.routes.js  -> GET /api/devis/torsion/:id/pdf
 router.get("/devis/torsion/:id/pdf", auth, only("admin"), async (req, res) => {
   try {
     const devis = await DevisTorsion.findById(req.params.id).lean();
@@ -266,11 +267,12 @@ router.get("/devis/torsion/:id/pdf", auth, only("admin"), async (req, res) => {
     const buf = toBuffer(devis?.demandePdf?.data);
     if (!buf?.length) return res.status(404).json({ success: false, message: "PDF non trouvé" });
 
+    const filename = `devis-torsion-${devis.numero || req.params.id}.pdf`;
     res.setHeader("Content-Type", devis.demandePdf.contentType || "application/pdf");
     res.setHeader("Content-Length", buf.length);
-    res.setHeader(
-      "Content-Disposition",
-      `inline; filename="devis-torsion-${req.params.id}.pdf"`
+    // filename normal + filename* UTF-8 pour une compat max
+    res.setHeader("Content-Disposition",
+      `inline; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`
     );
     res.end(buf);
   } catch (e) {
@@ -278,6 +280,7 @@ router.get("/devis/torsion/:id/pdf", auth, only("admin"), async (req, res) => {
     res.status(500).json({ success: false, message: "Erreur serveur" });
   }
 });
+
 
 router.get("/devis/torsion/:id/document/:index", auth, only("admin"), async (req, res) => {
   const devis = await DevisTorsion.findById(req.params.id).lean();
