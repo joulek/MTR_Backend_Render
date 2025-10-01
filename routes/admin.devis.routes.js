@@ -6,6 +6,127 @@ import DevisTorsion from "../models/DevisTorsion.js"; // ✅ ajouté
 import DevisCompression from "../models/DevisCompression.js"; // ✅ ajouté
 const router = Router();
 
+
+/* ------------------------------------------------------------------
+ * 📌 TOUTES LES DEMANDES DE DEVIS (agrégation multi-modèles)
+ *    GET /api/admin/devis/all
+ *    Query:
+ *      - q       : texte (numero, user prénom/nom, email)
+ *      - page    : 1..N (défaut 1)
+ *      - limit   : 1..100 (défaut 20)
+ *      - from    : ISO >= createdAt
+ *      - to      : ISO <= createdAt
+ *      - type    : 'all' | 'traction' | 'torsion' | 'compression' | 'grille' | 'fil' | 'autre'
+ * ------------------------------------------------------------------ */
+
+router.get("/devis/all", auth, only("admin"), async (req, res) => {
+  try {
+    const page  = Math.max(1, parseInt(req.query.page ?? "1", 10));
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit ?? "20", 10)));
+    const q     = String(req.query.q || "").trim();
+    const type  = String(req.query.type || "all").toLowerCase();
+    const from  = req.query.from ? new Date(req.query.from) : null;
+    const to    = req.query.to   ? new Date(req.query.to)   : null;
+
+    // précompile la regex pour la recherche "numero" + filtres en mémoire (user)
+    const rx = q ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") : null;
+
+    // Filtre commun sur les dates
+    const dateMatch = {};
+    if (from && !isNaN(from)) dateMatch.$gte = from;
+    if (to && !isNaN(to))     dateMatch.$lte = to;
+
+    // Construit un match Mongo minimal (numero + createdAt). Le reste (user, email) sera filtré en mémoire.
+    const baseMatch = {};
+    if (Object.keys(dateMatch).length) baseMatch.createdAt = dateMatch;
+    if (rx) baseMatch.numero = rx;
+
+    // Table de configuration des modèles à agréger
+    const SOURCES = [
+      { kind: "traction",   Model: DevisTraction,    enabled: type === "all" || type === "traction" },
+      { kind: "torsion",    Model: DevisTorsion,     enabled: type === "all" || type === "torsion"  },
+      { kind: "compression",Model: DevisCompression, enabled: type === "all" || type === "compression" },
+      { kind: "grille",     Model: DevisGrille,      enabled: type === "all" || type === "grille" },
+      { kind: "fil",        Model: DevisFilDresse,   enabled: type === "all" || type === "fil" },
+      { kind: "autre",      Model: DevisAutre,       enabled: type === "all" || type === "autre" },
+    ].filter(s => s.enabled);
+
+    // Récupère toutes les listes en parallèle
+    const results = await Promise.all(
+      SOURCES.map(async ({ kind, Model }) => {
+        const rows = await Model.find(baseMatch)
+          .populate("user", "prenom nom email numTel")
+          .sort("-createdAt")
+          .lean();
+
+        // mapping minimal commun + drapeaux
+        const mapped = rows.map(it => ({
+          _id: it._id,
+          numero: it.numero,
+          type: it.type || kind,           // sécurité : s'il n'y a pas "type" en base
+          kind,                             // on conserve la provenance
+          createdAt: it.createdAt,
+          updatedAt: it.updatedAt,
+          user: it.user || null,
+          // champs utiles côté admin
+          spec: it.spec,
+          exigences: it.exigences,
+          remarques: it.remarques,
+          documents: Array.isArray(it.documents)
+            ? it.documents.map((d, idx) => ({
+                index: idx,
+                filename: d?.filename,
+                mimetype: d?.mimetype,
+                size: toBuffer(d?.data)?.length || 0,
+                hasData: !!(toBuffer(d?.data)?.length),
+              }))
+            : [],
+          hasDemandePdf: !!(toBuffer(it?.demandePdf?.data)?.length),
+        }));
+
+        return mapped;
+      })
+    );
+
+    // Fusion
+    let all = results.flat();
+
+    // Filtre mémoire supplémentaire sur q (prénom/nom/email) si fourni
+    if (rx) {
+      all = all.filter(it => {
+        const u = it.user || {};
+        return (
+          rx.test(it.numero || "") ||
+          rx.test(u.prenom || "") ||
+          rx.test(u.nom || "") ||
+          rx.test(u.email || "")
+        );
+      });
+    }
+
+    // Tri global (desc) par createdAt
+    all.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    const total = all.length;
+    const start = (page - 1) * limit;
+    const end   = start + limit;
+    const items = all.slice(start, end);
+
+    res.json({
+      success: true,
+      page,
+      limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+      items,
+    });
+  } catch (e) {
+    console.error("GET /api/admin/devis/all error:", e);
+    res.status(500).json({ success: false, message: "Erreur serveur" });
+  }
+});
+
+
 /** Convertir les données Mongo en Buffer utilisable */
 function toBuffer(maybeBinary) {
   if (!maybeBinary) return null;
@@ -249,6 +370,11 @@ router.get("/devis/compression/:id/document/:index", auth, only("admin"), async 
 
 // routes/admin.devis.routes.js (extrait – ajoute ce bloc GRILLE)
 import DevisGrille from "../models/DevisGrille.js";
+
+
+
+
+
 
 // util binaire déjà défini: toBuffer(...)
 

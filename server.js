@@ -77,7 +77,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/produits", ProductRoutes);
 app.use("/api/articles", ArticleRoutes);
-app.use("/api/users", userRoutes);
+app.use("/api/users", userRoutes);   
 app.use("/api/admin", adminDevisRoutes);
 
 app.use("/api/devis/traction", devisTractionRoutes);
