@@ -138,14 +138,26 @@ export async function listMyDevis(req, res) {
  */
 // controllers/devis.admin.controller.js (exemple de chemin)
 
+// controllers/devis.admin.controller.js
+
+/**
+ * GET /api/devis/devis/list
+ * Query:
+ *  - page, limit
+ *  - type = all|compression|traction|torsion|fil|grille|autre
+ *  - q    = recherche (numero, meta.demandes.numero, client.nom)
+ */
 export async function listDevisCompact(req, res) {
   try {
-    const page  = Math.max(1, parseInt(req.query.page ?? "1", 10));
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit ?? "20", 10)));
-    const skip  = (page - 1) * limit;
+    const page = Math.max(1, parseInt(req.query.page ?? "1", 10));
+    const limit = Math.min(
+      100,
+      Math.max(1, parseInt(req.query.limit ?? "20", 10))
+    );
+    const skip = (page - 1) * limit;
 
     const typeQ = String(req.query.type || "all").toLowerCase();
-    const q     = String(req.query.q || "").trim();
+    const q = String(req.query.q || "").trim();
 
     /* ====== MATCH ====== */
     const match = {};
@@ -153,7 +165,7 @@ export async function listDevisCompact(req, res) {
       match.$or = [
         { "meta.demandes.type": typeQ },
         { "meta.typeDemande": typeQ },
-        { "typeDemande": typeQ },
+        { typeDemande: typeQ },
         { type: typeQ },
       ];
     }
@@ -172,7 +184,7 @@ export async function listDevisCompact(req, res) {
     const pipeline = [
       { $match: match },
 
-      /* 1) Normaliser meta.demandes en tableau */
+      /* 1) meta.demandes → array */
       {
         $addFields: {
           _demandesArray: {
@@ -191,17 +203,17 @@ export async function listDevisCompact(req, res) {
         },
       },
 
-      /* 2) Legacy -> tableau */
+      /* 2) Legacy demandes → array */
       {
         $addFields: {
           _legacyDemandes: [
             {
               numero: { $ifNull: ["$demandeNumero", null] },
-              type:   { $ifNull: ["$typeDemande", "$meta.typeDemande"] },
+              type: { $ifNull: ["$typeDemande", "$meta.typeDemande"] },
             },
             {
               numero: { $ifNull: ["$meta.demandeNumero", null] },
-              type:   { $ifNull: ["$meta.typeDemande", null] },
+              type: { $ifNull: ["$meta.typeDemande", null] },
             },
           ],
         },
@@ -219,7 +231,7 @@ export async function listDevisCompact(req, res) {
         },
       },
 
-      /* 3.bis) Filtrer les entrées vides */
+      /* 3.bis) Nettoyage */
       {
         $addFields: {
           _allDemandes: {
@@ -229,8 +241,18 @@ export async function listDevisCompact(req, res) {
               cond: {
                 $and: [
                   { $ne: ["$$d", null] },
-                  { $ne: ["$$d.numero", null] },
-                  { $ne: ["$$d.numero", ""] },
+                  {
+                    $ne: [
+                      {
+                        $cond: [
+                          { $eq: [{ $type: "$$d" }, "object"] },
+                          { $ifNull: ["$$d.numero", null] },
+                          "$$d", // si string
+                        ],
+                      },
+                      null,
+                    ],
+                  },
                 ],
               },
             },
@@ -238,86 +260,146 @@ export async function listDevisCompact(req, res) {
         },
       },
 
-      /* 3.5) 🔥 Dédupliquer par numero */
+      /* 3.1) Normaliser → {numero, type} حتى لو كانت string */
+      {
+        $addFields: {
+          _allDemandesNorm: {
+            $map: {
+              input: "$_allDemandes",
+              as: "d",
+              in: {
+                $cond: [
+                  { $eq: [{ $type: "$$d" }, "object"] },
+                  {
+                    numero: "$$d.numero",
+                    type: { $toLower: { $ifNull: ["$$d.type", null] } },
+                  },
+                  { numero: "$$d", type: null },
+                ],
+              },
+            },
+          },
+        },
+      },
+
+      /* 3.5) Dédup par numero */
       {
         $addFields: {
           _uniqDemandesAgg: {
             $reduce: {
-              input: { $ifNull: ["$_allDemandes", []] },
+              input: { $ifNull: ["$_allDemandesNorm", []] },
               initialValue: { numeros: [], out: [] },
               in: {
                 $cond: [
                   { $in: ["$$this.numero", "$$value.numeros"] },
                   "$$value",
                   {
-                    numeros: { $concatArrays: ["$$value.numeros", ["$$this.numero"]] },
-                    out:     { $concatArrays: ["$$value.out", ["$$this"]] }
-                  }
-                ]
-              }
-            }
-          }
-        }
+                    numeros: {
+                      $concatArrays: ["$$value.numeros", ["$$this.numero"]],
+                    },
+                    out: { $concatArrays: ["$$value.out", ["$$this"]] },
+                  },
+                ],
+              },
+            },
+          },
+        },
       },
       { $addFields: { _uniqDemandes: "$_uniqDemandesAgg.out" } },
 
-      /* 4) Dérivés */
+      /* 4) Récupérer tous les types possibles + fallback */
       {
         $addFields: {
-          _demandeNumeros: {
+          _typesCandidates: {
             $setUnion: [
-              { $map: { input: "$_uniqDemandes", as: "d", in: "$$d.numero" } },
-              [],
-            ],
-          },
-          _types: {
-            $setUnion: [
-              { $map: { input: "$_uniqDemandes", as: "d", in: { $ifNull: ["$$d.type", ""] } } },
-              [],
+              { $map: { input: "$_uniqDemandes", as: "d", in: "$$d.type" } },
+              [{ $toLower: { $ifNull: ["$type", null] } }],
+              [{ $toLower: { $ifNull: ["$typeDemande", null] } }],
+              [{ $toLower: { $ifNull: ["$meta.typeDemande", null] } }],
             ],
           },
         },
       },
-
-      /* 5) Projection compacte + champs nécessaires au front */
       {
-        $project: {
-          _id: 1,                         // requis pour URL DDV/documents
-          numero: 1,                      // numéro du devis final (DV…)
-          createdAt: 1,
-          clientNom: "$client.nom",
-          devisPdf: { $concat: [ORIGIN, "/files/devis/", "$numero", ".pdf"] },
-
-          // type principal : on tente plusieurs sources
-          type: {
-            $toLower: {
-              $ifNull: [
-                "$type",
-                { $ifNull: ["$typeDemande", "$meta.typeDemande"] }
-              ]
-            }
-          },
-
-          // documents/attachments si existants (pour la colonne pièces jointes)
-          documents: "$documents",
-          attachments: "$attachments",
-
-          // listes pour l’affichage “multi demandes”
-          demandes: "$_uniqDemandes",          // [{numero, type}]
-          demandeNumeros: "$_demandeNumeros",
-          types: {
+        $addFields: {
+          _typesClean: {
             $filter: {
-              input: "$_types",
+              input: "$_typesCandidates",
               as: "t",
               cond: { $and: [{ $ne: ["$$t", null] }, { $ne: ["$$t", ""] }] },
             },
           },
         },
       },
+      {
+        $addFields: {
+          primaryType: { $ifNull: [{ $arrayElemAt: ["$_typesClean", 0] }, null] },
+        },
+      },
+
+      /* 4.2) remplir type الناقص داخل demandes بالـ primaryType */
+      {
+        $addFields: {
+          _uniqDemandesFilled: {
+            $map: {
+              input: "$_uniqDemandes",
+              as: "d",
+              in: {
+                numero: "$$d.numero",
+                type: {
+                  $toLower: { $ifNull: ["$$d.type", "$primaryType"] },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      /* 5) Dérivés نهائيين */
+      {
+        $addFields: {
+          _demandeNumeros: {
+            $setUnion: [
+              { $map: { input: "$_uniqDemandesFilled", as: "d", in: "$$d.numero" } },
+              [],
+            ],
+          },
+          _typesFinal: {
+            $setUnion: [
+              { $map: { input: "$_uniqDemandesFilled", as: "d", in: "$$d.type" } },
+              [],
+            ],
+          },
+        },
+      },
+
+      /* 6) Projection compacte + حقول لازمة للـUI */
+      {
+        $project: {
+          _id: 1,
+          numero: 1, // DV…
+          createdAt: 1,
+          clientNom: "$client.nom",
+
+          // رابط PDF النهائي (fichiers devis)
+          devisPdf: { $concat: [ORIGIN, "/files/devis/", "$numero", ".pdf"] },
+
+          // type الأساسي لروابط DDV
+          type: "$primaryType",
+
+          // للواجهة
+          demandes: "$_uniqDemandesFilled", // [{numero,type}] (بدون دوبل)
+          demandeNumeros: "$_demandeNumeros",
+          types: "$_typesFinal",
+
+          documents: "$documents",
+          attachments: "$attachments",
+        },
+      },
 
       { $sort: { createdAt: -1 } },
 
-      /* 6) Pagination */
+      /* 7) Pagination */
       {
         $facet: {
           meta: [{ $count: "total" }],
@@ -336,33 +418,25 @@ export async function listDevisCompact(req, res) {
 
     const items = (agg?.items || []).map((d) => ({
       _id: d._id,
-      type: d.type || null,
-
-      devisNumero: d.numero,            // DV…
+      type: d.type || null, // مستنتج، ماعادش null في أغلب الحالات
+      devisNumero: d.numero,
       devisPdf: d.devisPdf,
       client: d.clientNom || "",
       date: d.createdAt,
-
       documents: d.documents || [],
       attachments: d.attachments ?? 0,
-
-      demandes: d.demandes || [],       // [{ numero, type }, ...] (dédupliqué)
+      demandes: d.demandes || [],
       demandeNumeros: d.demandeNumeros || [],
       types: d.types || [],
     }));
 
-    return res.json({
-      success: true,
-      page,
-      limit,
-      total: agg?.total || 0,
-      items,
-    });
+    return res.json({ success: true, page, limit, total: agg?.total || 0, items });
   } catch (e) {
     console.error("listDevisCompact error:", e);
     return res.status(500).json({ success: false, message: "Erreur serveur" });
   }
 }
+
 
 
 
