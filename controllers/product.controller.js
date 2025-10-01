@@ -8,10 +8,9 @@ import Product from "../models/Product.js";
 const UPLOAD_PUBLIC_URL = "/uploads";
 const UPLOAD_DIR = path.resolve(process.cwd(), "uploads");
 
-/** Util : fabrique une URL publique absolue à partir d'un filename multer */
-function toPublicUrl(req, filename) {
-  const host = `${req.protocol}://${req.get("host")}`;
-  return `${host}${UPLOAD_PUBLIC_URL}/${filename}`;
+/** Util : fabrique un CHEMIN public relatif (stable) à partir d'un filename multer */
+function toPublicPath(filename) {
+  return `${UPLOAD_PUBLIC_URL}/${filename}`;
 }
 
 /** Util : supprime un fichier si présent (best effort) */
@@ -57,8 +56,8 @@ export const createProduct = async (req, res) => {
   try {
     const { name_fr, name_en, description_fr, description_en, category } = req.body;
 
-    // fichiers uploadés par multer
-    const images = (req.files || []).map((f) => toPublicUrl(req, f.filename));
+    // fichiers uploadés par multer → stocker des chemins RELATIFS /uploads/...
+    const images = (req.files || []).map((f) => toPublicPath(f.filename));
 
     const product = await Product.create({
       name_fr,
@@ -132,8 +131,8 @@ export const updateProduct = async (req, res) => {
     }
     if (!Array.isArray(removeImages)) removeImages = [];
 
-    // fichiers ajoutés par multer
-    const uploaded = (req.files || []).map((f) => toPublicUrl(req, f.filename));
+    // fichiers ajoutés par multer → chemins RELATIFS /uploads/...
+    const uploaded = (req.files || []).map((f) => toPublicPath(f.filename));
 
     const product = await Product.findById(id);
     if (!product) return res.status(404).json({ message: "Product not found" });
