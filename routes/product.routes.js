@@ -1,6 +1,5 @@
 // MTR_Backend/routes/product.routes.js
 import { Router } from "express";
-import { upload } from "../middleware/upload.js";
 import {
   createProduct,
   getProducts,
