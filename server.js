@@ -5,7 +5,6 @@ import dotenv from "dotenv";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import path from "path";
-import multer from "multer";
 import {upload }from "./middleware/upload.js";
 import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
@@ -30,7 +29,6 @@ import dashboardRoutes from "./routes/dashboard.routes.js";
 dotenv.config();
 
 const app = express();
-const upload = multer({ limits: { fileSize: 5 * 1024 * 1024, files: 10 } });
 
 /* ✅ important avec Render/Heroku (X-Forwarded-Proto → Secure cookies) */
 app.set("trust proxy", 1);
