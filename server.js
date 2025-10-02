@@ -6,7 +6,7 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import path from "path";
 import multer from "multer";
-
+import {upload }from "./middleware/upload.js";
 import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import devisTractionRoutes from "./routes/devisTraction.routes.js";
@@ -95,7 +95,11 @@ app.use("/api/dashboard", dashboardRoutes);
 
 /* 404 */
 /* ✅ statiques (placer AVANT les routes 404) */
-app.use("/uploads", express.static(path.resolve(process.cwd(), "uploads")));
+app.use("/uploads", express.static(path.resolve(process.cwd(), "uploads"), {
+  fallthrough: true,
+  // facultatif mais utile:
+  extensions: ["png","jpg","jpeg","webp","gif"],
+}));
 
 app.use("/files/devis", express.static(path.resolve(process.cwd(), "storage/devis")));
 app.use("/files", express.static(path.join(process.cwd(), "files"), {
