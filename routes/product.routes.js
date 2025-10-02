@@ -10,7 +10,7 @@ import {
 } from "../controllers/product.controller.js";
 
 // ✅ importer ton middleware commun
-import { upload } from "../middlewares/upload.js";
+import { upload } from "../middleware/upload.js";
 
 const router = Router();
 
