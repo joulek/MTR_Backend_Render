@@ -95,7 +95,15 @@ app.use("/api/dashboard", dashboardRoutes);
 
 /* 404 */
 /* ✅ statiques (placer AVANT les routes 404) */
-app.use("/uploads", express.static(path.resolve(process.cwd(), "uploads")));
+app.use(
+  "/uploads",
+  (req, res, next) => {
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    next();
+  },
+  express.static(path.resolve(process.cwd(), "uploads"))
+);
+
 app.use("/files/devis", express.static(path.resolve(process.cwd(), "storage/devis")));
 app.use("/files", express.static(path.join(process.cwd(), "files"), {
   setHeaders(res, filePath) {
