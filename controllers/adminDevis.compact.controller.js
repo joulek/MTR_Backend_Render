@@ -71,11 +71,7 @@ export async function listMyDevis(req, res) {
       { $match: match },
       {
         $project: {
-<<<<<<< HEAD
-          _id: 1,                                     
-=======
           _id: 1,
->>>>>>> 49a484007db6376d256d88f865f9d1cdb9b1bc52
           numero: 1,
           createdAt: 1,
           devisPdf: { $concat: [reqOrigin, "/files/devis/", "$numero", ".pdf"] },
