@@ -248,7 +248,6 @@ router.get("/devis/compression/:id/document/:index", auth, only("admin"), async 
 });
 
 // routes/admin.devis.routes.js (extrait – ajoute ce bloc GRILLE)
-import DevisGrille from "../models/DevisGrille.js";
 
 // util binaire déjà défini: toBuffer(...)
 
@@ -329,8 +328,6 @@ router.get("/devis/grille/:id/document/:index", auth, only("admin"), async (req,
 /** -------------------------
  * 📌 FIL DRESSÉ
  * ------------------------- */
-import DevisFilDresse from "../models/DevisFilDresse.js"; // 🔹 adapte le chemin selon ton projet
-
 
 // 📌 Liste des devis fil dressé
 router.get("/devis/fil", auth, only("admin"), async (req, res) => {
@@ -406,7 +403,7 @@ router.get("/devis/fil/:id/document/:index", auth, only("admin"), async (req, re
 /** -------------------------
  * 📌 AUTRE ARTICLE
  * ------------------------- */
-import DevisAutre from "../models/DevisAutre.js"; // 🔹 adapte le chemin/nom selon ton projet
+
 
 // 📌 Liste des devis "autre"
 router.get("/devis/autre", auth, only("admin"), async (req, res) => {
