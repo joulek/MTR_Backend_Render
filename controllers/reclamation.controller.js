@@ -501,20 +501,39 @@ export async function adminListReclamations(req, res) {
 export const streamReclamationPdf = async (req, res) => {
   try {
     const { id } = req.params;
-    const r = await Reclamation.findById(id).select("demandePdf pdf").lean();
+    // on récupère aussi le numero pour le nom de fichier
+    const r = await Reclamation.findById(id)
+      .select("numero demandePdf pdf")
+      .lean();
 
-    const bin = r?.demandePdf?.data || r?.pdf?.data;
+    const raw = r?.demandePdf?.data || r?.pdf?.data;
+    const buf = Buffer.isBuffer(raw)
+      ? raw
+      : raw?.buffer
+      ? Buffer.from(raw.buffer)
+      : raw
+      ? Buffer.from(raw)
+      : null;
+
     const type = r?.demandePdf?.contentType || r?.pdf?.contentType || "application/pdf";
-    if (!bin) return res.status(404).json({ success: false, message: "PDF introuvable" });
+    if (!buf?.length) return res.status(404).json({ success: false, message: "PDF introuvable" });
+
+    const filename = `reclamation-${r?.numero || id}.pdf`;
 
     res.setHeader("Content-Type", type);
-    res.setHeader("Content-Disposition", `inline; filename="reclamation-${id}.pdf"`);
-    return res.send(Buffer.from(bin.buffer || bin));
+    res.setHeader("Content-Length", buf.length);
+    // nom compatible (RFC 5987) pour la boîte “Enregistrer sous…”
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`
+    );
+    res.send(buf);
   } catch (e) {
     console.error("streamReclamationPdf:", e);
     res.status(500).json({ success: false, message: "Erreur serveur" });
   }
 };
+
 
 export const streamReclamationDocument = async (req, res) => {
   try {

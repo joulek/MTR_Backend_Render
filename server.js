@@ -5,8 +5,7 @@ import dotenv from "dotenv";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import path from "path";
-import multer from "multer";
-
+import {upload }from "./middleware/upload.js";
 import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import devisTractionRoutes from "./routes/devisTraction.routes.js";
@@ -30,15 +29,16 @@ import dashboardRoutes from "./routes/dashboard.routes.js";
 dotenv.config();
 
 const app = express();
-const upload = multer({ limits: { fileSize: 5 * 1024 * 1024, files: 10 } });
 
 /* ✅ important avec Render/Heroku (X-Forwarded-Proto → Secure cookies) */
 app.set("trust proxy", 1);
 
 /* ✅ CORS: origine(s) explicites + cookies */
 const ALLOWED_ORIGINS = [
+
   "https://mtr-frontend-render-1.onrender.com",
   "http://localhost:3000",
+
 ];
 app.use(
   cors({
@@ -58,8 +58,6 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 /* ✅ statiques */
-app.use("/uploads", express.static(path.resolve(process.cwd(), "uploads")));
-app.use("/files/devis", express.static(path.resolve(process.cwd(), "storage/devis")));
 
 /* ---------------------- MongoDB ---------------------- */
 const MONGO_URI = process.env.MONGODB_URI || "mongodb://localhost:27017/myapp_db";
@@ -78,7 +76,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/produits", ProductRoutes);
 app.use("/api/articles", ArticleRoutes);
-app.use("/api/users", userRoutes);
+app.use("/api/users", userRoutes);   
 app.use("/api/admin", adminDevisRoutes);
 
 app.use("/api/devis/traction", devisTractionRoutes);
@@ -97,7 +95,29 @@ app.use("/api/contact", contactRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 
 /* 404 */
+/* ✅ statiques (placer AVANT les routes 404) */
+app.use("/uploads", express.static(path.resolve(process.cwd(), "uploads"), {
+  fallthrough: true,
+  // facultatif mais utile:
+  extensions: ["png","jpg","jpeg","webp","gif"],
+}));
+
+app.use("/files/devis", express.static(path.resolve(process.cwd(), "storage/devis")));
+app.use("/files", express.static(path.join(process.cwd(), "files"), {
+  setHeaders(res, filePath) {
+    if (filePath.endsWith(".pdf")) {
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    }
+  }
+}));
+
+/* ---------------------- Routes ---------------------- */
+// ... toutes tes routes API ...
+
+/* 404 - garder VRAIMENT en dernier */
 app.use((req, res) => res.status(404).json({ error: "Route not found" }));
+
 
 /* Global error handler */
 app.use((err, req, res, next) => {
@@ -111,6 +131,7 @@ const PORT = process.env.PORT || 4000;
 const server = app.listen(PORT, () =>
   console.log(`🚀 Server running on http://localhost:${PORT}`)
 );
+
 
 const shutdown = async () => {
   console.log("\n⏹️  Shutting down...");

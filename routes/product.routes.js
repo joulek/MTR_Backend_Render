@@ -1,25 +1,33 @@
 // MTR_Backend/routes/product.routes.js
 import { Router } from "express";
-import { upload } from "../middleware/upload.js";
 import {
   createProduct,
   getProducts,
   getProductById,
   updateProduct,
   deleteProduct,
-  getProductsByCategory                // ⬅️ import
-
+  getProductsByCategory,
 } from "../controllers/product.controller.js";
+
+// ✅ importer ton middleware commun
+import { upload } from "../middleware/upload.js";
+
 const router = Router();
 
+// Routes produits
 router.get("/", getProducts);
-router.get("/by-category/:categoryId", getProductsByCategory); // ⬅️ NEW
+router.get("/by-category/:categoryId", getProductsByCategory);
 
-
+// Création produit avec images (max 20 fichiers)
 router.post("/", upload.array("images", 20), createProduct);
-router.get("/:id", getProductById);
-router.put("/:id", upload.array("images", 20), updateProduct); // maj avec images
-router.delete("/:id", deleteProduct);
 
+// Récupération par ID
+router.get("/:id", getProductById);
+
+// Mise à jour produit avec images
+router.put("/:id", upload.array("images", 20), updateProduct);
+
+// Suppression
+router.delete("/:id", deleteProduct);
 
 export default router;

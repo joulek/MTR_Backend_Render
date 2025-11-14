@@ -249,7 +249,7 @@ export async function placeClientOrder(req, res) {
 
     // 8) Envoi email
     const adminToRaw = (process.env.ADMIN_EMAIL || "").trim();
-    const adminTo = isValidEmail(adminToRaw) ? adminToRaw : "joulekyosr123@gmail.com";
+    const adminTo = isValidEmail(adminToRaw) ? adminToRaw : "commercial@mtr-ressorts.tn";
     const from = (process.env.MAIL_FROM || "").trim() || `MTR <no-reply@mtr.tn>`;
     const cc = isValidEmail(uEmail) ? [uEmail] : undefined;
 
